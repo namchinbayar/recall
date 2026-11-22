@@ -20,6 +20,15 @@ from .. import db
 from ..config import Settings
 from . import tools
 
+try:    # the HTTP library the SDK streams over; older SDKs use httpx
+    from httpx2 import HTTPError as _TransportError
+except ImportError:
+    from httpx import HTTPError as _TransportError
+
+# What a failed model call raises: the SDK's own errors, and a connection that drops in the
+# middle of a streamed reply, which the SDK passes on as the HTTP library raised it.
+CALL_ERRORS = (anthropic.APIError, _TransportError)
+
 SYSTEM = """You are recall, a personal assistant with a memory. You help one person: the user who runs you. You have tools over their private knowledge base (saved articles, notes, files, and memories from past conversations) and over metrics from their machines and manual logs.
 
 How to work:
@@ -67,25 +76,31 @@ class Session:
     def turn(self, user_text: str, out=sys.stdout) -> str:
         """Run one user turn to completion. Returns the final assistant text."""
         now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+        asked = len(self.messages)
         self.messages.append({"role": "user", "content": f"[{now}, host {socket.gethostname()}]\n{user_text}"})
 
         final_text = ""
         while True:
-            with self.client.beta.messages.stream(
-                model=self.model,
-                max_tokens=16000,
-                system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
-                tools=tools.TOOLS,
-                messages=self.messages,
-                output_config={"effort": self.effort},
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
-            ) as stream:
-                for event in stream:
-                    if event.type == "content_block_delta" and event.delta.type == "text_delta":
-                        out.write(event.delta.text)
-                        out.flush()
-                response = stream.get_final_message()
+            try:
+                with self.client.beta.messages.stream(
+                    model=self.model,
+                    max_tokens=16000,
+                    system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
+                    tools=tools.TOOLS,
+                    messages=self.messages,
+                    output_config={"effort": self.effort},
+                    betas=["server-side-fallback-2026-07-01"],
+                    fallbacks="default",
+                ) as stream:
+                    for event in stream:
+                        if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                            out.write(event.delta.text)
+                            out.flush()
+                    response = stream.get_final_message()
+            except CALL_ERRORS:
+                if len(self.messages) == asked + 1:   # nothing came back, so the question can be asked again
+                    del self.messages[asked:]
+                raise
 
             self.messages.append({"role": "assistant", "content": response.content})
             final_text = "".join(b.text for b in response.content if b.type == "text")
@@ -99,19 +114,26 @@ class Session:
             if response.stop_reason != "tool_use":
                 break
 
+            calls = [block for block in response.content if block.type == "tool_use"]
             results = []
-            for block in response.content:
-                if block.type != "tool_use":
-                    continue
-                if self.show_tools:
-                    out.write(f"\n  \033[2m> {tools.describe_call(block.name, block.input)}\033[0m\n")
-                    out.flush()
-                content, is_error = tools.run(self.settings, block.name, block.input)
-                item = {"type": "tool_result", "tool_use_id": block.id, "content": content}
-                if is_error:
-                    item["is_error"] = True
-                results.append(item)
-            self.messages.append({"role": "user", "content": results})
+            try:
+                for block in calls:
+                    if self.show_tools:
+                        out.write(f"\n  \033[2m> {tools.describe_call(block.name, block.input)}\033[0m\n")
+                        out.flush()
+                    content, is_error = tools.run(self.settings, block.name, block.input)
+                    item = {"type": "tool_result", "tool_use_id": block.id, "content": content}
+                    if is_error:
+                        item["is_error"] = True
+                    results.append(item)
+            finally:
+                # Every call needs an answer in the history, or the API refuses the next turn.
+                # Ctrl-C in the middle of a tool leaves some without one.
+                results += [
+                    {"type": "tool_result", "tool_use_id": block.id, "content": "interrupted before it finished", "is_error": True}
+                    for block in calls[len(results):]
+                ]
+                self.messages.append({"role": "user", "content": results})
 
         out.write("\n")
         return final_text

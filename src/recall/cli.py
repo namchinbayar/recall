@@ -15,7 +15,7 @@ from . import doctor as doctor_mod
 from . import sessions as sessions_mod
 from . import sync as sync_mod
 from .metrics.cli import app as metrics_app
-from .agent.chat import Session
+from .agent.chat import CALL_ERRORS, Session
 from . import helptext
 from .vault_cli import app as vault_app
 from .stream.cli import app as stream_app
@@ -112,6 +112,10 @@ def list_cmd() -> None:
         typer.secho(f"      {row['_id']}", fg="bright_black")
 
 
+def _api_error(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {(str(exc).splitlines() or [''])[0][:200]}"
+
+
 @app.command()
 def ask(
     question: Annotated[str, typer.Argument()],
@@ -121,7 +125,10 @@ def ask(
     """One question to the agent, with tools."""
     settings = config.load()
     session = Session.start(settings, show_tools=not quiet)
-    session.turn(question)
+    try:
+        session.turn(question)
+    except CALL_ERRORS as exc:
+        raise SystemExit(f"the model call failed: {_api_error(exc)}") from None
     if not no_save:
         session.save()
 
@@ -150,10 +157,17 @@ def chat(
             session.turn(line)
         except KeyboardInterrupt:
             typer.echo("\n[interrupted]")
+        except CALL_ERRORS as exc:   # the chat goes on; what was said so far is kept
+            typer.echo(f"\n[the model call failed: {_api_error(exc)}]")
     if not no_save and session.messages:
         typer.secho("\nwrapping up...", fg="bright_black")
-        session.wrap_up()
-        typer.secho("session saved", fg="bright_black")
+        try:
+            session.wrap_up()
+            typer.secho("session saved", fg="bright_black")
+        except (*CALL_ERRORS, KeyboardInterrupt) as exc:
+            session.save()      # no summary and no last memories, but the conversation is not lost
+            why = "interrupted" if isinstance(exc, KeyboardInterrupt) else _api_error(exc)
+            typer.secho(f"session saved without a wrap-up ({why})", fg="bright_black")
 
 
 @app.command(name="sync")
