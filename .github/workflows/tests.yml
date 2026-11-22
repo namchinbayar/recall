@@ -1,0 +1,33 @@
+# Both test suites on every pull request and on main. Neither needs a database, a key or
+# the network: everything outside is stood in for.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The Python and uv versions the container image uses (deploy/cloudflare/Dockerfile).
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.9"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run pytest -q
+
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test deploy/cloudflare/test/*.js

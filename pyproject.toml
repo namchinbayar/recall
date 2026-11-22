@@ -17,6 +17,11 @@ dependencies = [
     "cryptography>=43.0",
     "confluent-kafka[avro,schemaregistry]>=2.6",
     "mcp>=1.20",
+    # Imported by the online server and the MCP tools; mcp brings them in, but recall uses them itself.
+    "pyjwt[crypto]>=2.10",
+    "starlette>=0.48",
+    "anyio>=4.9",
+    "pydantic>=2.12",
 ]
 
 [project.scripts]
@@ -31,6 +36,5 @@ packages = ["src/recall"]
 
 [dependency-groups]
 dev = [
-    "anyio>=4.15.1",
     "pytest>=9.2.0",
 ]
