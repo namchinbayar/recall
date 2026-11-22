@@ -32,6 +32,10 @@ const METADATA_MS = 60 * 60 * 1000;
 const HANDOFF_MS = 2 * 60 * 1000; // how long the app has to collect its session
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/; // base64url SHA-256, as PKCE sends it
 
+// The authorization server could not answer just now (an error of its own, or too many
+// requests). Not a refusal: the session it was asked about is still good.
+export class Unavailable extends Error {}
+
 function b64url(bytes) {
 	let text = "";
 	for (const byte of new Uint8Array(bytes)) text += String.fromCharCode(byte);
@@ -190,7 +194,12 @@ export class Sessions {
 		}
 		const code = url.searchParams.get("code");
 		if (!code) return fail(400, "Sign-in was not completed", "The sign-in page returned without an approval.");
-		const tokens = await this.token({ grant_type: "authorization_code", code, redirect_uri: this.redirectUri, code_verifier: started.verifier });
+		const tokens = await this.token({
+			grant_type: "authorization_code", code, redirect_uri: this.redirectUri, code_verifier: started.verifier,
+		}).catch((error) => {
+			if (error instanceof Unavailable) return null;
+			throw error;
+		});
 		if (!tokens) return fail(502, "Sign-in could not be completed", "The sign-in service did not accept the request.");
 		const user = await this.allowed(tokens.access);
 		if (!user) return fail(403, "This account cannot use recall", "recall is private and this account is not on its list.");
@@ -240,6 +249,7 @@ export class Sessions {
 	}
 
 	// One call to the token endpoint. Returns {access, refresh, expires} or null when refused.
+	// Throws Unavailable when the server failed to answer (5xx, 408, 429) rather than said no.
 	async token(fields) {
 		const { token_endpoint: endpoint } = await this.endpoints();
 		const resp = await this.fetch(endpoint, {
@@ -249,6 +259,9 @@ export class Sessions {
 		});
 		if (!resp.ok) {
 			console.warn("token request refused", resp.status, fields.grant_type);
+			if (resp.status >= 500 || resp.status === 408 || resp.status === 429) {
+				throw new Unavailable(`the sign-in service answered ${resp.status}`);
+			}
 			return null;
 		}
 		const got = await resp.json();
@@ -283,7 +296,12 @@ export class Sessions {
 			return null;
 		}
 		if (session.expires - this.now() < EARLY_MS) {
-			session = await this.refresh(id);
+			try {
+				session = await this.refresh(id);
+			} catch (error) {
+				// The early refresh could not be made; the token in hand still has a little time.
+				if (!(error instanceof Unavailable) || session.expires <= this.now()) throw error;
+			}
 			if (!session) return null;
 		}
 		let renew;
@@ -296,7 +314,8 @@ export class Sessions {
 	}
 
 	// A new access token for a session. Requests that arrive together share one refresh,
-	// because the authorization server may accept each refresh token only once.
+	// because the authorization server may accept each refresh token only once. A refusal ends
+	// the session; when the server only failed to answer (Unavailable) the session is kept.
 	refresh(id) {
 		if (!this.refreshing.has(id)) {
 			this.refreshing.set(id, this.refreshOnce(id).finally(() => this.refreshing.delete(id)));

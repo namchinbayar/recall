@@ -7,7 +7,7 @@
 // with the app's session cookie. recall checks that token like any other. A timer keeps the
 // container running so the first request after a quiet spell does not wait for a start.
 import { DurableObject } from "cloudflare:workers";
-import { COOKIE, Sessions } from "./session.js";
+import { COOKIE, Sessions, Unavailable } from "./session.js";
 
 const PORT = 8791;
 const INSTANCE = "basic";
@@ -63,6 +63,16 @@ export class RecallServer extends DurableObject {
 
 	// A request from the app: find its session and forward it with that session's token.
 	async api(request) {
+		try {
+			return await this.forApp(request);
+		} catch (error) {
+			if (!(error instanceof Unavailable)) throw error;
+			// The session is kept, so the app only has to ask again.
+			return json({ error: "the sign-in service is not answering; try again in a moment" }, 503, { "retry-after": "10" });
+		}
+	}
+
+	async forApp(request) {
 		if (!this.sessions.fromApp(request)) return json({ error: "this request did not come from the recall app" }, 403);
 		const session = await this.sessions.access(request);
 		if (!session) return json({ error: "sign in first" }, 401);
