@@ -135,8 +135,23 @@ def keep(settings: Settings, docs: list[dict], policy: noise.Policy) -> list[dic
     return out
 
 
+def docs_of(events: list[dict]) -> list[dict]:
+    """One doc per event. An event that cannot be turned into one is skipped and named: the
+    batch is stored before its offsets are committed, so raising here would bring the same
+    record back after every restart."""
+    docs = []
+    for event in events:
+        try:
+            docs.append(to_doc(event))
+        except Exception as exc:
+            ident = event.get("event_id") if isinstance(event, dict) else None
+            print(f"skipped an event that could not be stored ({ident!r}): {type(exc).__name__}: {exc}",
+                  file=sys.stderr, flush=True)
+    return docs
+
+
 def store(settings: Settings, events: list[dict], policy: noise.Policy | None = None) -> int:
-    docs = keep(settings, [to_doc(e) for e in events], policy or noise.load())
+    docs = keep(settings, docs_of(events), policy or noise.load())
     if not docs:
         return 0
     vectors = embed.embed_documents(settings, [d["text"] for d in docs])
