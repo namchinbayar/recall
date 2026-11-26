@@ -35,7 +35,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import ingest, sync
-from .config import Settings
+from .config import Settings, personal
 from .stream import spool
 
 STATE = spool.STATE_DIR / "sessions.json"
@@ -50,7 +50,7 @@ TAGS = ["session-note", "claude"]
 PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-5-5": (0.10, 0.50)}
 REPLY_TOKENS = 1_500       # a note plus the model's thinking, for the estimate
 
-SYSTEM = """You keep the record of working sessions between the user and an AI coding assistant. \
+SYSTEM = personal("""You keep the record of working sessions between {owner} and an AI coding assistant. \
 The record goes into their personal knowledge base, where they and their other assistants search it \
 weeks later to answer "what did we decide about X, and why?".
 
@@ -78,7 +78,7 @@ Rules:
 - Leave out a section that would be empty. Keep the whole note under 450 words; a short session needs far fewer.
 - Never include passwords, API keys, tokens, card numbers or ID numbers, even partially.
 - If the session holds nothing worth finding later (a quick question, small talk, a false start), \
-reply with the single word SKIP."""
+reply with the single word SKIP.""")
 
 _REMINDER = re.compile(r"<system-reminder>.*?</system-reminder>", re.S)
 _NOT_SAID = ("<task-notification", "<local-command", "<command-name", "<command-message",

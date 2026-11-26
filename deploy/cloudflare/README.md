@@ -52,6 +52,7 @@ Settings are Worker secrets, none are in this repository:
 | `MONGODB_USERNAME`, `MONGODB_PASSWORD` | a database user limited to the recall database |
 | `VOYAGE_API_KEY`, `VOYAGE_MODEL` | embeddings |
 | `RECALL_AGENT_KEYS` | `name:<sha256 of the key>` per agent key (not secret: only hashes); main README, "Online" |
+| `RECALL_OWNER` | optional: your name, as the `remember` example should write it; main README, "Learning from Hermes conversations" |
 
 The container's outbound address is not fixed, so the database's IP access list
 must allow any address; the database user's password is then the lock.

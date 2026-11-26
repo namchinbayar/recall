@@ -137,7 +137,7 @@ def catch_up(
 
 @tool(WRITE_SCOPE, title="Remember a fact", annotations=ADD)
 def remember(
-    fact: Annotated[str, Field(description="One standalone sentence, e.g. 'The user runs niri on CachyOS.'")],
+    fact: Annotated[str, Field(description=config.personal("One standalone sentence, e.g. '{Owner} runs niri on CachyOS.'"))],
     tags: Annotated[list[str] | None, Field(description="Optional topic tags.")] = None,
 ) -> str:
     """Store one durable fact (a preference, decision, correction, or fact about their setup)."""
