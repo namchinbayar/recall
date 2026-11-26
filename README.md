@@ -421,7 +421,10 @@ by the main instance, so turn those off for the profile.
   words: names, ids, error strings), reranks them with Voyage `rerank-3`, and
   adds a small recency bonus (`RECALL_RECENCY_WEIGHT`, default 0.05, halving
   every `RECALL_RECENCY_HALF_LIFE_DAYS`, default 30) so the newer of two
-  equally relevant chunks wins. `recall init` creates both indexes, and the
+  equally relevant chunks wins. A session note is a record of one day and is never
+  brought up to date, so when a newer source of another kind (a memory, a synced
+  note, a saved page) scores within `RECALL_RECORD_MARGIN` of it (default 0.075;
+  0 turns this off), the session note is placed just below that source. `recall init` creates both indexes, and the
   plain index on tag and date that the lists and counts (memories, events,
   session notes) read from; run it again after an update that adds one. Without
   the text index it falls back to vector search alone and says so on stderr;

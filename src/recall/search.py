@@ -8,7 +8,9 @@
    scores relevance directly, which beats either retriever's own score.
 3. Recency: a small bonus that halves every RECENCY_HALF_LIFE_DAYS, so of two
    equally relevant chunks the newer one wins. It never outweighs relevance.
-4. One source, one place: a long note matching in five chunks would fill the
+4. Dated records: a session note says what was true on its day. When a newer
+   source of another kind answers nearly as well, the session note goes below it.
+5. One source, one place: a long note matching in five chunks would fill the
    page; by default only the best chunk of each source is returned.
 
 Time words ("yesterday", "last week", "in October", "since 2026-11-20") are
@@ -35,6 +37,11 @@ from .config import Settings
 RECENCY_WEIGHT = float(os.environ.get("RECALL_RECENCY_WEIGHT", "0.05"))
 RECENCY_HALF_LIFE_DAYS = float(os.environ.get("RECALL_RECENCY_HALF_LIFE_DAYS", "30"))
 PER_SOURCE = 1
+RECORD_TAG = "session-note"     # a record of one day, never brought up to date afterwards
+# How close a newer source must score for a session note to step below it. Measured with
+# `recall eval` on 2026-11-26: outdated session notes led their replacements by 0.045 and 0.048,
+# while a session note that was the right answer led the nearest newer note by 0.083.
+RECORD_MARGIN = float(os.environ.get("RECALL_RECORD_MARGIN", "0.075"))
 # A window listed without a subject: what they worked on first, then what they told an assistant, then the rest.
 BROWSE_ORDER = ("session-note", "memory")
 BROWSE_CHUNKS = 400     # read at most this many chunks of a window listed without a subject
@@ -232,6 +239,31 @@ def rank(query: str, hits: list[Hit], limit: int, rerank_fn=None, now: datetime 
     return sorted(hits, key=lambda h: h.score, reverse=True)[:limit]
 
 
+def yield_to_newer(hits: list[Hit], margin: float | None = None) -> list[Hit]:
+    """Session notes step below newer material that answers nearly as well. Best first in, best first out.
+
+    A session note records what was found and decided on one day and is never brought up to date.
+    A memory, a synced note or a saved page is kept as things are now: when something changes it
+    is rewritten, replaced or retired. So when one of those is newer than a session note and
+    scores within `margin` of it, the session note is the older account of the same thing; it
+    is placed just under that source, where it still shows what was true then. A session note
+    that answers clearly better, or that is the newest word on its subject, keeps its place.
+    Events are dated records too and move nothing."""
+    margin = RECORD_MARGIN if margin is None else margin
+    if margin <= 0:
+        return hits
+    kept = [h for h in hits if h.created_at and RECORD_TAG not in h.tags and "event" not in h.tags]
+    moved = False
+    for r in hits:
+        if RECORD_TAG not in r.tags or r.created_at is None:
+            continue
+        newer = [k.score for k in kept if r.score - margin <= k.score < r.score and k.created_at > r.created_at]
+        if newer:
+            r.score = max(newer) - 0.001
+            moved = True
+    return sorted(hits, key=lambda h: h.score, reverse=True) if moved else hits
+
+
 def search(
     settings: Settings,
     query: str,
@@ -270,5 +302,7 @@ def search(
     found = candidates(settings, query, vector, n, tags, include_events, exclude_tags, window)
     use_rerank = rerank and bool(settings.rerank_model)
     ranked = rank(query, found, len(found), (lambda q, docs: embed.rerank(settings, q, docs)) if use_rerank else None)
+    if use_rerank:          # without the reranker a score is a place in the list, and the margin means nothing
+        ranked = yield_to_newer(ranked)
     out += per_source(ranked, cap)[:limit]
     return out

@@ -260,3 +260,51 @@ def test_an_index_without_the_date_field_filters_after_retrieval(monkeypatch):
 
     monkeypatch.setattr(search.db, "chunks", lambda s: Coll())
     assert [h.title for h in search.candidates(SETTINGS, "q", [0.0], 5, None, False, None, WINDOW)] == ["inside"]
+
+
+# ----- session notes step below newer material -------------------------------
+
+def dated(source, score, days_old, *tags):
+    return Hit(source=source, title=source, chunk_index=0, text="", score=score, tags=list(tags),
+               created_at=NOW - timedelta(days=days_old))
+
+
+def order(hits, margin=0.1):
+    return [h.source for h in search.yield_to_newer(hits, margin)]
+
+
+def test_a_session_note_steps_below_a_newer_note_that_answers_nearly_as_well():
+    review = dated("session:review", 0.92, 16, "session-note", "claude")
+    removed = dated("file:removed.md", 0.87, 5, "memory-note")
+    other = dated("session:other", 0.72, 3, "session-note")
+    assert order([review, removed, other]) == ["file:removed.md", "session:review", "session:other"]
+    assert review.score == pytest.approx(0.869) and removed.score == 0.87      # only the session note's score changes
+
+
+def test_a_session_note_keeps_its_place_when_nothing_newer_comes_close():
+    def session(score=0.92, days_old=16):
+        return dated("session:s", score, days_old, "session-note")
+
+    assert order([session(), dated("file:old.md", 0.87, 30, "memory-note")]) == ["session:s", "file:old.md"]      # older
+    assert order([session(), dated("file:far.md", 0.80, 1, "memory-note")]) == ["session:s", "file:far.md"]       # not close
+    assert order([session(), dated("event:e", 0.90, 1, "event", "hermes")]) == ["session:s", "event:e"]           # an event
+    assert order([session(), dated("session:t", 0.90, 1, "session-note")]) == ["session:s", "session:t"]          # another record
+    assert order([session(), dated("file:new.md", 0.87, 5, "memory-note")], margin=0) == ["session:s", "file:new.md"]
+    undated = Hit("file:u.md", "u", 0, "", 0.9, ["memory-note"])
+    assert order([session(), undated]) == ["session:s", "file:u.md"]
+
+
+def test_a_session_note_goes_under_the_best_of_several_newer_notes_and_no_further():
+    hits = [dated("session:s", 0.90, 20, "session-note"), dated("memory:a", 0.88, 2, "memory"),
+            dated("https://page", 0.85, 1), dated("file:far.md", 0.70, 1, "memory-note")]
+    assert order(hits) == ["memory:a", "session:s", "https://page", "file:far.md"]
+
+
+def test_search_applies_it_only_when_the_reranker_scored_the_hits(monkeypatch):
+    found = [dated("session:s", 0.0, 16, "session-note"), dated("file:new.md", 0.0, 5, "memory-note")]
+    monkeypatch.setattr(search.embed, "embed_query", lambda s, q: [0.0])
+    monkeypatch.setattr(search, "candidates", lambda *a, **k: [Hit(**vars(h)) for h in found])
+    monkeypatch.setattr(search.embed, "rerank", lambda s, q, docs: [0.92, 0.87])
+    monkeypatch.setattr(search, "RECENCY_WEIGHT", 0)
+    assert [h.source for h in search.search(SETTINGS, "q")] == ["file:new.md", "session:s"]
+    assert [h.source for h in search.search(SETTINGS, "q", rerank=False)] == ["session:s", "file:new.md"]
