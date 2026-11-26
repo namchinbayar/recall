@@ -204,6 +204,46 @@ systemctl --user daemon-reload
 systemctl --user enable --now recall-doctor.service
 ```
 
+## Search quality
+
+`recall eval` answers "did that change make search better or worse?". It reads a question
+set, puts each question through the same search the assistants use, and reports how often
+the answer came first, how often it was among the results, and which questions missed.
+
+```bash
+cp contrib/eval.example.toml ~/.config/recall/eval.toml   # then write your own questions
+recall eval                 # the numbers, and every question that went wrong
+recall eval --save          # keep this run as the baseline
+recall eval --no-rerank     # the same questions with one thing changed, against the baseline
+recall eval -v              # every question with its place and top score
+```
+
+```toml
+[[case]]
+q = "where do the services read their secrets from"
+expect = "file:~/notes/secrets-proton-pass.md"     # or a list: any of them counts
+avoid = "file:~/notes/secrets-1password.md"        # a replaced note that must not come first
+
+[[case]]
+q = "best sourdough hydration ratio"
+expect = []                                        # nothing stored answers it: stay quiet
+```
+
+- `expect` and `avoid` are source ids as `recall list` prints them; `*` matches any run of
+  characters and `file:~/` is the home folder.
+- A question with an empty `expect` passes when the top score stays under 0.55, the mark
+  below which the Hermes provider hands nothing over.
+- A question whose expected source is no longer stored is listed apart and not counted:
+  search cannot find what is not there.
+- With a baseline saved (`~/.local/state/recall/eval.json`), every later run ends with what
+  moved: which questions got better and which got worse.
+- Each question costs one embedding call and one rerank call. Nothing is written to the
+  database.
+
+Write the questions from the sources, the way they would really be asked, and not from what
+search returns today; otherwise the set only measures what already works. The question set
+is personal, so it stays outside the repository.
+
 ## Hermes memory provider
 
 Hermes can use recall as its external memory, so that what it knows comes from

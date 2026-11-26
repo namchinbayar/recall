@@ -98,6 +98,44 @@ def search_cmd(
         typer.echo()
 
 
+@app.command(name="eval")
+def eval_cmd(
+    file: Annotated[Path | None, typer.Option("--file", help="Question set (default ~/.config/recall/eval.toml).")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="How many results count as found.")] = 5,
+    no_rerank: Annotated[bool, typer.Option("--no-rerank", help="Rank by retrieval order alone.")] = False,
+    pool: Annotated[int | None, typer.Option("--pool", help="Candidates the reranker reads.")] = None,
+    save: Annotated[bool, typer.Option("--save", help="Keep this run as the baseline later runs are compared with.")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="List every question, not only the ones that went wrong.")] = False,
+) -> None:
+    """Ask every question in the question set and report how often search found the answer."""
+    from . import evals
+
+    cases = evals.load(file)
+    settings = config.load()
+    rerank = not no_rerank and bool(settings.rerank_model)
+    how = {"limit": limit, "rerank": settings.rerank_model if rerank else None, "pool": pool, "model": settings.voyage_model}
+    typer.secho(f"{len(cases)} questions, top {limit}, embeddings {settings.voyage_model}, "
+                f"rerank {how['rerank'] or 'off'}" + (f", pool {pool}" if pool else ""), fg="bright_black")
+
+    def ask(case: evals.Case) -> list:
+        return search.search(settings, case.q, limit=limit, tags=list(case.tags) or None,
+                             include_events=case.events, rerank=rerank, pool=pool, when=True)
+
+    with typer.progressbar(length=len(cases), label="asking") as bar:
+        outcomes = evals.run(cases, ask, evals.stored_sources(settings), progress=lambda i: bar.update(1))
+    baseline = evals.load_baseline()
+    for line in evals.report(outcomes, limit, baseline, verbose):
+        typer.echo(line)
+    if not rerank:
+        typer.secho("without the reranker a score is a place in the list, not relevance: "
+                    "ignore the quiet questions in this run", fg="bright_black")
+    if save:
+        evals.save_baseline(evals.snapshot(outcomes, how))
+        typer.secho(f"saved as the baseline ({evals.BASELINE})", fg="bright_black")
+    elif baseline is None:
+        typer.secho("no baseline yet: run it again with --save to keep this one", fg="bright_black")
+
+
 @app.command(name="list")
 def list_cmd() -> None:
     """List stored sources."""

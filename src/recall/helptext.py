@@ -41,12 +41,15 @@ HEALTH
   recall doctor [--alert]          check services, database, search, embeddings, vault key
                                    (recall-doctor.service checks every 10 min and alerts the phone)
   recall doctor --test-alert       send one test message to the phone
+  recall eval [--save] [-v]        ask the questions in eval.toml and report how often search
+                                   found the answer; --save keeps the run as the baseline
 
 SETUP
   recall init                      create the vector index (once)
   recall stream purge [--yes]      drop noisy and repeated notifications (noise.toml)
   recall metrics init              create the time series collection (once)
   ~/.config/recall/sync.toml       folders and files for `recall sync` (contrib/sync.example.toml)
+  ~/.config/recall/eval.toml       questions and their answers for `recall eval` (contrib/eval.example.toml)
   config: $RECALL_ENV, ./.env, ~/.config/recall/env, or the project .env
 
 MORE

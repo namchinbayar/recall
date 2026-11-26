@@ -1,0 +1,36 @@
+# Questions for `recall eval`. Copy to ~/.config/recall/eval.toml and replace them with your own:
+# things you or your assistants really ask, each with the source that answers it.
+#
+#   q       the question, worded the way it would be asked (not the title of the answer)
+#   expect  the source that answers it, as `recall list` prints it; a list means any of them.
+#           `*` matches any run of characters, and file:~/ is your home folder.
+#           An empty list means nothing stored answers it and search should stay quiet.
+#   avoid   sources that must not rank above the answer, such as a note that was replaced
+#   tags    search only these tags, as `recall search --tag` does
+#   events  true to include notifications and Hermes exchanges
+#   note    anything you want to remember about the case
+#
+# Thirty to fifty questions is enough to see a change. Write them from the sources, not from what
+# search returns today, or the set only measures what already works.
+
+[[case]]
+q = "how does the compositor reload its config"
+expect = "file:~/notes/niri.md"
+
+[[case]]
+q = "where do the services read their secrets from"
+expect = "file:~/notes/secrets-proton-pass.md"
+avoid = "file:~/notes/secrets-1password.md"      # replaced; it should not come first
+
+[[case]]
+q = "why did we stop the nightly job"
+expect = ["session:0b1f6c1e-*", "file:~/notes/nightly-job.md"]
+tags = ["session-note", "memory-note"]
+
+[[case]]
+q = "NullPointerException in PaymentRetryWorker"     # exact words: the full-text half of search
+expect = "https://example.com/postmortems/payment-retries"
+
+[[case]]
+q = "best sourdough hydration ratio"
+expect = []                                          # nothing stored answers this
