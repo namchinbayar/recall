@@ -14,7 +14,7 @@ from pymongo.errors import OperationFailure
 from voyageai.error import RateLimitError
 
 from .. import ingest, search
-from ..config import Settings
+from ..config import Settings, personal
 from ..metrics import store as mstore
 from . import memory
 
@@ -55,7 +55,7 @@ TOOLS: list[dict] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "fact": {"type": "string", "description": "A standalone sentence, e.g. 'The user runs niri on CachyOS and prefers Chrome Beta.'"},
+                "fact": {"type": "string", "description": personal("A standalone sentence, e.g. '{Owner} runs niri on CachyOS and prefers Chrome Beta.'")},
                 "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional topic tags."},
             },
             "required": ["fact"],

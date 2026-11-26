@@ -293,6 +293,15 @@ the `turns` collection for 120 days. Exchanges that exist only as events
 (older ones, and the cloud agent's) are copied in as they are. `turns` is never
 searched, and an exchange that looks like it holds a secret is not kept.
 
+**Your name in what is stored.** Set `RECALL_OWNER=Ada` in the env file and the
+prompts that write stored text name you: learned facts read "Ada runs niri on
+CachyOS", session notes and the profile are about Ada, and the example the
+`remember` tool shows assistants uses the name too. Without it they say "the
+user". Only stored text changes; the instructions that tell an assistant how to
+use recall always say "the user", since that assistant is talking to you. The
+name is read when a command or service starts, so restart the services after
+setting it. Memories already stored are not rewritten.
+
 What the model may decide, and what code decides:
 
 - The model (`RECALL_LEARN_MODEL`, else `RECALL_SUMMARY_MODEL`) proposes facts

@@ -29,6 +29,19 @@ def _load_env() -> None:
 _load_env()
 
 
+def owner() -> str:
+    """Who this recall belongs to, as stored text should name them: RECALL_OWNER, else "the user".
+    It goes into the prompts that write facts, session notes and the profile, so a fact reads
+    "Ada runs niri" where it would read "The user runs niri"."""
+    return " ".join(os.environ.get("RECALL_OWNER", "").split())[:60] or "the user"
+
+
+def personal(text: str) -> str:
+    """A prompt with its {owner} and {Owner} marks filled in ({Owner} starts a sentence)."""
+    name = owner()
+    return text.replace("{Owner}", name[:1].upper() + name[1:]).replace("{owner}", name)
+
+
 @dataclass(frozen=True)
 class Settings:
     mongodb_uri: str
