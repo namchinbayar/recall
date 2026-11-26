@@ -70,8 +70,8 @@ with Docker: with podman the pushed image gets a different digest than the one w
 asks Cloudflare for, so the script pushes the image itself and deploys by that digest.
 `podman-for-wrangler` is a wrapper for `wrangler deploy --dry-run` and local checks.
 
-`deploy.sh` deploys only a clean checkout of master, so what runs is always a commit
-on master and one branch's deploy cannot replace another's work (merge first;
+`deploy.sh` deploys only a clean checkout of main, so what runs is always a commit
+on main and one branch's deploy cannot replace another's work (merge first;
 `RECALL_DEPLOY_ANY_BRANCH=1` skips the branch check in an emergency). It sets
 `RELEASE` to that commit, and a running container is replaced when `RELEASE`
 changes, so a new commit restarts it with the new image. After changing only a
