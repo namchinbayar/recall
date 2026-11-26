@@ -1,0 +1,33 @@
+#!/bin/sh
+# wrangler builds and pushes the image with the Docker CLI. Podman takes the same commands
+# with two differences on `build`, handled here; everything else passes straight through.
+#   --provenance=...  Docker BuildKit only: dropped.
+#   -f -              wrangler sends the Dockerfile on stdin, which podman cannot open when
+#                     stdin is a socket: saved to a temporary file first.
+# Use:  WRANGLER_DOCKER_BIN=$PWD/podman-for-wrangler \
+#       DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock wrangler deploy
+dockerfile=""
+previous=""
+for arg do
+  shift
+  case "$arg" in
+    --provenance|--provenance=*) ;;
+    -)
+      if [ "$previous" = "-f" ]; then
+        dockerfile=$(mktemp "${TMPDIR:-/tmp}/wrangler-dockerfile.XXXXXX")
+        cat > "$dockerfile"
+        set -- "$@" "$dockerfile"
+      else
+        set -- "$@" "$arg"
+      fi ;;
+    *) set -- "$@" "$arg" ;;
+  esac
+  previous="$arg"
+done
+if [ -n "$dockerfile" ]; then
+  /usr/bin/podman "$@" < /dev/null
+  status=$?
+  rm -f "$dockerfile"
+  exit $status
+fi
+exec /usr/bin/podman "$@"

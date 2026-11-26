@@ -1,0 +1,46 @@
+# Extra drop rules for desktop notifications, on top of the built-in ones in
+# src/recall/stream/noise.py (screenshots, saved logins, app updates, test
+# popups, keyring prompts, "% off" promos).
+#
+# Copy to ~/.config/recall/noise.toml (or point $RECALL_NOISE at it), then
+# restart recall-notify and recall-sink. `recall stream purge` applies the
+# same rules to what is already stored (dry run unless --yes).
+#
+# Each [[drop]] takes regexes for app, summary, and body (case-insensitive);
+# every one given must match. Tether mirrors iPhone notifications, so its
+# summary is usually the phone app or sender.
+
+repeat_window_days = 7
+
+# --- iPhone marketing and feeds (via Tether) ---
+[[drop]]
+app = "^Tether$"
+summary = "^(Y Combinator( reposted)?|For you|Reminder)$|· (New|For you)$|• Following$|^Now in r/"
+reason = "feed"
+
+[[drop]]
+app = "^Tether$"
+summary = "earn and save|save or earn|great gifts|creator workshop|feeling lucky|national .* day|credit usage win"
+reason = "promo"
+
+[[drop]]
+app = "^Tether$"
+summary = "^Unsecure website blocked$|^Retry Browser Form Filling$"
+reason = "system"
+
+# --- Money and health stay off the cloud (Kafka, Voyage, Atlas) ---
+[[drop]]
+app = "^Tether$"
+summary = "^(Experian|Credit Karma|Varo|Chime|SoFi|Apple\\s*Cash)\\b|card declined|\\brx order\\b"
+reason = "finance/health"
+
+[[drop]]
+app = "^Tether$"
+body = "available balance|\\bbalance is\\b|prescription"
+reason = "finance/health"
+
+# --- Desktop chatter ---
+[[drop]]
+app = "^Hermes$"
+summary = "^Hermes finished$"
+reason = "hermes ping (the exchange itself arrives through the Hermes hook)"

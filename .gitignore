@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+dist/
+*.egg-info/
+
+# Cloudflare deployment: local settings and wrangler state
+deploy/cloudflare/settings.local.json
+deploy/cloudflare/.wrangler/
+deploy/cloudflare/wrangler.deploy.jsonc

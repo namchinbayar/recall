@@ -1,0 +1,13 @@
+[Unit]
+Description=recall: produce spooled events (Hermes hook) into Kafka
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/env
+
+[Service]
+ExecStart=%h/.local/bin/recall stream spool
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

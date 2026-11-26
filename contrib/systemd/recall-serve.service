@@ -1,0 +1,16 @@
+[Unit]
+Description=recall: answer context requests on a local socket (Hermes memory provider)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/env
+
+[Service]
+# One long-running process holds the database and Voyage connections and
+# listens on $XDG_RUNTIME_DIR/recall.sock (mode 600), so a program that wants
+# recall on every turn needs neither the keys nor a Proton Pass sign-in per call.
+ExecStart=%h/.local/bin/recall serve
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

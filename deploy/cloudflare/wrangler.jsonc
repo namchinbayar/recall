@@ -1,0 +1,40 @@
+// recall's online MCP server on Cloudflare: a Worker in front of one container.
+// Settings and secrets are not in this file; they are Worker secrets (see README.md here).
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "recall-online",
+	"main": "src/index.js",
+	"compatibility_date": "2026-11-01",
+	// Only the public name below; no workers.dev address and no preview addresses.
+	"workers_dev": false,
+	"preview_urls": false,
+	// The public name, as a Worker custom domain: Cloudflare creates and owns its DNS record.
+	"routes": [{ "pattern": "recall.example.com", "custom_domain": true }],
+	"observability": { "enabled": true },
+	// The recall app: the files in ./app, served by Cloudflare without running the Worker.
+	// Any other page address gets the app's one page. The paths listed here always go to the
+	// Worker: the MCP endpoint, the app's API and the sign-in.
+	"assets": {
+		"directory": "./app",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/mcp", "/mcp/*", "/.well-known/*", "/healthz", "/serve", "/api/*", "/auth/*", "/oauth/*"]
+	},
+	// deploy.sh sets RELEASE to the deployed commit; a new value restarts the container with
+	// the new image and the current secrets. "dev" is only for local runs.
+	"vars": { "RELEASE": "dev" },
+	"containers": [
+		{
+			"class_name": "RecallServer",
+			"scheduling_policy": "durable_object",
+			"images": {
+				"base": { "dockerfile": "./Dockerfile", "build_context": "../.." }
+			}
+		}
+	],
+	"durable_objects": {
+		"bindings": [{ "name": "RECALL", "class_name": "RecallServer" }]
+	},
+	"exports": {
+		"RecallServer": { "type": "durable-object", "storage": "sqlite" }
+	}
+}

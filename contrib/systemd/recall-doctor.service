@@ -1,0 +1,16 @@
+[Unit]
+Description=recall: check every part and send a problem to the phone
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/env
+
+[Service]
+# Every ten minutes. A failure seen twice in a row goes out through Bark
+# (BARK_KEY, and BARK_ENC_KEY when encrypted; the drop-in reads them from
+# ~/.config/phone-push/env), or as a desktop notification without them.
+ExecStart=%h/.local/bin/recall doctor --loop --interval 600 --alert
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

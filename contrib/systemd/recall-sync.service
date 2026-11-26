@@ -1,0 +1,17 @@
+[Unit]
+Description=recall: keep the files in sync.toml saved and current
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/env
+ConditionPathExists=%h/.config/recall/sync.toml
+
+[Service]
+# A long-lived loop, like recall-metrics: one `pass-cli run` at start instead of one
+# per check. It looks at file names, sizes and change times every minute and
+# only opens files and the database when one of them moved.
+ExecStart=%h/.local/bin/recall sync --loop --interval 60
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

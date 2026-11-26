@@ -1,0 +1,44 @@
+#!/bin/sh
+# Run a command with recall's secrets resolved from Proton Pass (2026-11-21).
+# Replaces `op run` for recall. Usage, same shape as op/pass-cli run:
+#   recall-pass-run [--no-masking] --env-file FILE [--env-file FILE ...] -- COMMAND [ARGS...]
+#
+# How it works
+# - The env files hold pass://vault/item/field references; `pass-cli run` resolves them.
+# - recall's Proton Pass personal access token is TPM-encrypted at
+#   ~/.config/credstore.encrypted/recall-pass-token.cred (stored with recall-pass-token-store).
+#   Systemd units hand it over with LoadCredentialEncrypted=recall-pass-token:...; outside a
+#   unit this script decrypts it with systemd-creds itself.
+# - Token-login sessions last 2 hours (Proton's limit), so before each run it checks the
+#   session and logs in again only when needed, under a lock so parallel starts share one login.
+# - The session lives in its own folder (not your own pass-cli login). The fs key provider keeps
+#   the session key beside it, owner-only; per-service kernel keyrings would not let services
+#   share one session. Anyone who can read this folder as you could already decrypt the token.
+# - The token is passed only to the `pass-cli login` child, never to the command that runs.
+set -eu
+
+PASS_CLI=/usr/bin/pass-cli
+state="${XDG_STATE_HOME:-$HOME/.local/state}/recall"
+export PROTON_PASS_SESSION_DIR="$state/pass-session"
+export PROTON_PASS_KEY_PROVIDER=fs
+umask 077
+mkdir -p "$PROTON_PASS_SESSION_DIR"
+
+token() {
+    if [ -n "${CREDENTIALS_DIRECTORY:-}" ] && [ -r "$CREDENTIALS_DIRECTORY/recall-pass-token" ]; then
+        cat "$CREDENTIALS_DIRECTORY/recall-pass-token"
+    else
+        systemd-creds decrypt --user --name=recall-pass-token \
+            "$HOME/.config/credstore.encrypted/recall-pass-token.cred" -
+    fi
+}
+
+(
+    flock -w 60 9
+    if ! "$PASS_CLI" info >/dev/null 2>&1; then
+        "$PASS_CLI" logout --force >/dev/null 2>&1 || true
+        PROTON_PASS_PERSONAL_ACCESS_TOKEN="$(token)" "$PASS_CLI" login >/dev/null
+    fi
+) 9>"$state/pass-login.lock"
+
+exec "$PASS_CLI" run "$@"

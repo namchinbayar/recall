@@ -1,0 +1,16 @@
+[Unit]
+Description=recall: sample system metrics into Atlas every minute
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/env
+
+[Service]
+# One long-lived loop rather than a one-minute timer: the env file holds
+# Proton Pass references, and resolving them 1,440 times a day would mean a
+# Proton round trip every minute.
+ExecStart=%h/.local/bin/recall metrics collect --loop --interval 60 --quiet
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

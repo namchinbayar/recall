@@ -1,0 +1,17 @@
+[Unit]
+Description=recall: the online MCP server (HTTP on a local port, behind a sign-in)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/env
+ConditionPathExists=%h/.config/recall/online.env
+
+[Service]
+# Listens on 127.0.0.1 only; a tunnel publishes it at RECALL_ONLINE_URL. online.env holds
+# no secrets: the public address, the authorization server's issuer and the allowed user ids.
+EnvironmentFile=%h/.config/recall/online.env
+ExecStart=%h/.local/bin/recall mcp-online
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

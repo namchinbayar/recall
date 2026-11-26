@@ -1,0 +1,26 @@
+#!/bin/sh
+# Start `recall mcp` (stdio) for an MCP client, with secrets resolved by Proton Pass.
+#
+# ~/.config/recall/env holds pass:// references (a Proton Pass vault; 1Password until
+# 2026-11-21), so the server starts
+# under recall-pass-run (`pass-cli run`), with the same TPM-encrypted Proton Pass
+# access token the systemd services use. systemd-run --pipe hands that credential over
+# and keeps stdin and stdout connected to the client, and it works even where the
+# calling app has no_new_privs set. --no-masking keeps pass-cli from rewriting the
+# JSON-RPC stream.
+#
+# The MCP server needs only the database and the embedding key, so it reads
+# ~/.config/recall/mcp.env (2 references) when that file exists, and the full
+# ~/.config/recall/env (7) otherwise. recall-pass-run reuses one token-login session
+# (2 h) across starts, so most client starts don't log in again.
+#
+# Install: cp contrib/bin/recall-mcp ~/.local/bin/ ; point clients at it.
+# RECALL_BIN overrides which recall runs (for testing a checkout).
+# Some clients start servers with a trimmed environment; systemd-run --user
+# needs the runtime dir to find the user manager.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+exec systemd-run --user --pipe --quiet --collect \
+  -p LoadCredentialEncrypted=recall-pass-token:"$HOME/.config/credstore.encrypted/recall-pass-token.cred" \
+  -E RECALL_BIN="${RECALL_BIN:-$HOME/.local/bin/recall}" \
+  /bin/sh -c 'cd "$HOME"; f="$HOME/.config/recall/mcp.env"; [ -r "$f" ] || f="$HOME/.config/recall/env"; exec "$HOME/.local/bin/recall-pass-run" --no-masking --env-file="$f" -- "$RECALL_BIN" mcp'

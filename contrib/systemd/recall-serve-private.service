@@ -1,0 +1,19 @@
+[Unit]
+Description=recall (private): context requests for the private Hermes profile on its own socket
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/private.env
+
+[Service]
+# The private instance: writes go to the "private" database, search also reads the main one
+# and never changes it (RECALL_READ_DBS in private.env). It listens on its own socket,
+# $XDG_RUNTIME_DIR/recall-private.sock (mode 600), so only a program pointed there gets
+# private material. Secrets come from Proton Pass the same way recall-serve.service gets them.
+ExecStartPre=/bin/sh -c 'for i in $$(seq 60); do getent hosts my.1password.com >/dev/null && exit 0; sleep 2; done; exit 1'
+LoadCredentialEncrypted=recall-pass-token:%h/.config/credstore.encrypted/recall-pass-token.cred
+ExecStart=%h/.local/bin/recall-pass-run --env-file=%h/.config/recall/private.env -- %h/.local/bin/recall serve --socket %t/recall-private.sock
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

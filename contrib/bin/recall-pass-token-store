@@ -1,0 +1,22 @@
+#!/bin/sh
+# Store recall's Proton Pass personal access token TPM-encrypted (2026-11-21).
+# Same pattern as the old 1Password token: systemd-creds, user scope,
+# loaded by units with LoadCredentialEncrypted. The token is read from the
+# terminal without echo and never written to a plain file.
+# Run again to replace it (e.g. after `pass-cli pat renew`).
+set -eu
+out="$HOME/.config/credstore.encrypted/recall-pass-token.cred"
+mkdir -p "$(dirname "$out")"
+printf 'Paste the Proton Pass access token (pst_...::...), then Enter: '
+stty -echo
+IFS= read -r tok
+stty echo
+printf '\n'
+case $tok in
+    pst_*::*) ;;
+    *) echo "That doesn't look like a personal access token (pst_...::...)." >&2; exit 1 ;;
+esac
+printf %s "$tok" | systemd-creds encrypt --user --name=recall-pass-token - "$out"
+tok=
+chmod 600 "$out"
+echo "Stored: $out"

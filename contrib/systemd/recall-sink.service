@@ -1,0 +1,13 @@
+[Unit]
+Description=recall: store Kafka events in Atlas with embeddings
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/env
+
+[Service]
+ExecStart=%h/.local/bin/recall stream sink
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

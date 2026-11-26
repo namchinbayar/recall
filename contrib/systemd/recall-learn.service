@@ -1,0 +1,17 @@
+[Unit]
+Description=recall: learn lasting facts from quiet Hermes conversations
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/env
+
+[Service]
+# A long-lived loop, like recall-sessions: every five minutes it copies new
+# Hermes exchanges in and calls the model only for a conversation that has
+# been quiet for 20 minutes and has something new in it. Every few hours it
+# rewrites the profile if the notes it is built from changed.
+ExecStart=%h/.local/bin/recall learn --loop --interval 300
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

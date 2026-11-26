@@ -1,0 +1,4 @@
+name: cloud-recall-events
+description: Send each finished Hermes exchange to recall's events_inbox topic (Confluent Cloud REST API)
+events:
+  - agent:end

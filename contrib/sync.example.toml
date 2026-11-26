@@ -1,0 +1,41 @@
+# Files and folders `recall sync` keeps in step with recall.
+#
+# Copy to ~/.config/recall/sync.toml (or point $RECALL_SYNC at it), try
+# `recall sync --dry-run`, then enable recall-sync.service (see the README).
+#
+# Each [[watch]] is a folder or a single file:
+#   path       folder or file (~ works)
+#   title      folder: label put before each file name; file: its title
+#   tags       tags for search filters
+#   include    folders only; file name patterns, default ["*.md", "*.txt"]
+#   exclude    patterns to leave out; a trailing slash means a folder
+#   recursive  folders only; default true
+#   max_kb     skip larger files; default 500
+#
+# Never saved, whatever is listed here: key and env files, binary files, and
+# any file whose text looks like it holds a secret (API key, private key,
+# password in a URL, SSN, EIN). Inside a folder, hidden files and folders and
+# symlinks are skipped as well. The dry run names every skipped file and why.
+
+# The notes Claude Code keeps about you and your setup. Saving them lets
+# Hermes, Codex and the rest read the same facts.
+[[watch]]
+path = "~/.claude/projects/-home-you/memory"
+title = "Claude memory"
+tags = ["claude", "memory-note"]
+include = ["*.md"]
+exclude = ["MEMORY.md"]          # the index repeats one line of every note
+
+# One file. A file saved earlier with `recall add` keeps its title and tags
+# unless you set them here.
+[[watch]]
+path = "~/Documents/system-notes.md"
+
+[[watch]]
+path = "~/.config/niri/config.kdl"
+tags = ["niri", "config"]
+
+# A notes folder, without its drafts.
+# [[watch]]
+# path = "~/Documents/Notes"
+# exclude = ["drafts/", "*.tmp.md"]

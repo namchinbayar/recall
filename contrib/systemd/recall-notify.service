@@ -1,0 +1,12 @@
+[Unit]
+Description=recall: stream desktop notifications into Kafka
+After=dms.service
+ConditionPathExists=%h/.config/recall/env
+
+[Service]
+ExecStart=%h/.local/bin/recall stream notify
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=niri.service

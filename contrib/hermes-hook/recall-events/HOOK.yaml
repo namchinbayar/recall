@@ -1,0 +1,4 @@
+name: recall-events
+description: Append each finished Hermes exchange to recall's event spool (recall stream spool sends it to Kafka)
+events:
+  - agent:end

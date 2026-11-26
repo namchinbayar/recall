@@ -1,0 +1,13 @@
+#!/bin/sh
+# Start `recall mcp` (stdio) for the private instance: tools write to the "private"
+# database only, and search also reads the main one without changing it.
+# Same mechanics as recall-mcp (see there); only the env file differs.
+#
+# Install: cp contrib/bin/recall-mcp-private ~/.local/bin/ ; point only the private
+# Hermes profile at it.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+exec systemd-run --user --pipe --quiet --collect \
+  -p LoadCredentialEncrypted=recall-pass-token:"$HOME/.config/credstore.encrypted/recall-pass-token.cred" \
+  -E RECALL_BIN="${RECALL_BIN:-$HOME/.local/bin/recall}" \
+  /bin/sh -c 'cd "$HOME"; exec "$HOME/.local/bin/recall-pass-run" --no-masking --env-file="$HOME/.config/recall/private.env" -- "$RECALL_BIN" mcp'

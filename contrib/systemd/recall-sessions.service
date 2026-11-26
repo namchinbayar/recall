@@ -1,0 +1,16 @@
+[Unit]
+Description=recall: write a note for each finished Claude Code session
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/recall/env
+
+[Service]
+# A long-lived loop, like recall-sync: every five minutes it looks at the
+# transcript files' sizes and change times, and calls the model only for a
+# session that has been quiet for 30 minutes and has something new in it.
+ExecStart=%h/.local/bin/recall sessions --loop --interval 300
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

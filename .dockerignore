@@ -1,0 +1,7 @@
+# Keep the image build context to what the Dockerfile copies.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src
+src/**/__pycache__
