@@ -22,8 +22,9 @@ For the recall app the Worker also does the sign-in (`src/session.js`):
 - `POST /auth/logout` ends the session and revokes its refresh token.
 - The iPhone app (`the companion iOS app`) signs in through the system sign-in sheet:
   `GET /auth/login?app=<challenge>` runs the same sign-in, but the callback sends the
-  sheet to `com.example.recall://signed-in?code=…` with a one-time code instead of setting
-  the cookie. The app posts that code and the verifier behind its challenge to
+  sheet to the app's own address (`RECALL_APP_REDIRECT`, such as
+  `com.example.recall://signed-in?code=…`) with a one-time code instead of setting
+  the cookie. Without that setting the app's sign-in is refused. The app posts that code and the verifier behind its challenge to
   `POST /auth/app/exchange` (with the `X-Recall-App` header) within two minutes and gets
   the session id, which it then sends as the `__Host-recall` cookie. A wrong verifier
   ends that session; the tokens never leave the Worker.
@@ -53,6 +54,7 @@ Settings are Worker secrets, none are in this repository:
 | `VOYAGE_API_KEY`, `VOYAGE_MODEL` | embeddings |
 | `RECALL_AGENT_KEYS` | `name:<sha256 of the key>` per agent key (not secret: only hashes); main README, "Online" |
 | `RECALL_OWNER` | optional: your name, as the `remember` example should write it; main README, "Learning from Hermes conversations" |
+| `RECALL_APP_REDIRECT` | optional: where the iPhone app's sign-in comes back to, the app's URL scheme (which needs a period in it) followed by `://signed-in`, such as `com.example.recall://signed-in`. Not secret. Leave it out when there is no iPhone app |
 
 The container's outbound address is not fixed, so the database's IP access list
 must allow any address; the database user's password is then the lock.

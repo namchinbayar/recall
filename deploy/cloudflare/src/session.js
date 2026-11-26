@@ -18,8 +18,6 @@ export const LOGIN_COOKIE = "__Host-recall-login";
 export const CLIENT_PATH = "/oauth/client.json";
 export const CALLBACK_PATH = "/auth/callback";
 export const APP_HEADER = "x-recall-app";
-// The iPhone app signs in through the system sign-in sheet, which comes back to this address.
-export const APP_REDIRECT = "com.example.recall://signed-in";
 export const EXCHANGE_PATH = "/auth/app/exchange";
 
 const AGENT = "recall-online"; // Descope refuses some default user agents
@@ -31,6 +29,15 @@ const TOUCH_MS = 60 * 60 * 1000; // record "last used" at most this often
 const METADATA_MS = 60 * 60 * 1000;
 const HANDOFF_MS = 2 * 60 * 1000; // how long the app has to collect its session
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/; // base64url SHA-256, as PKCE sends it
+// An address only an installed app can claim: its scheme has a period (RFC 8252, 7.1), which
+// no scheme a browser opens by itself (https, javascript, data) has.
+const APP_ADDRESS = /^[a-z][a-z0-9+-]*(\.[a-z0-9+-]+)+:\/\/[a-z0-9._~\/-]*$/i;
+
+// The address the iPhone app's sign-in sheet comes back to (the RECALL_APP_REDIRECT setting,
+// such as com.example.recall://signed-in), or null when it is not set or not an app's address.
+export function appRedirectOf(value) {
+	return typeof value === "string" && APP_ADDRESS.test(value) ? value : null;
+}
 
 // The authorization server could not answer just now (an error of its own, or too many
 // requests). Not a refusal: the session it was asked about is still good.
@@ -93,9 +100,12 @@ export class Sessions {
 	// store: get/put/delete/list as on Durable Object storage. issuer: the authorization
 	// server. resource: recall's public MCP address, which is also the token audience.
 	// allowed(token): resolves to the user id when recall accepts the token, else null.
-	constructor({ store, issuer, resource, allowed, fetch = globalThis.fetch.bind(globalThis), now = Date.now }) {
+	// appRedirect: where the iPhone app's sign-in comes back to; without it the app cannot sign in.
+	constructor({ store, issuer, resource, allowed, appRedirect, fetch = globalThis.fetch.bind(globalThis), now = Date.now }) {
 		Object.assign(this, { store, issuer: String(issuer).replace(/\/+$/, ""), resource, allowed, fetch, now });
 		this.origin = new URL(resource).origin;
+		this.appRedirect = appRedirectOf(appRedirect);
+		if (appRedirect && !this.appRedirect) console.warn("RECALL_APP_REDIRECT is not an app's address (like com.example.recall://signed-in); the app cannot sign in");
 	}
 
 	get clientId() {
@@ -156,6 +166,7 @@ export class Sessions {
 	async login(url) {
 		const app = url.searchParams.get("app");
 		if (app !== null && !CHALLENGE.test(app)) return page(400, "That sign-in could not start", "The app sent a sign-in request this site does not understand.");
+		if (app !== null && !this.appRedirect) return page(404, "The app cannot sign in here", "This site is not set up for the recall app.");
 		const { authorization_endpoint: authorize } = await this.endpoints();
 		const state = randomId();
 		const verifier = randomId(48);
@@ -192,6 +203,8 @@ export class Sessions {
 		if (!started || cookiesOf(request)[LOGIN_COOKIE] !== state || this.now() - started.at > LOGIN_MS) {
 			return fail(400, "That sign-in did not finish", "It took too long or was started in another browser.");
 		}
+		// The setting was taken away while this sign-in was under way.
+		if (started.app && !this.appRedirect) return fail(404, "The app cannot sign in here", "This site is not set up for the recall app.");
 		const code = url.searchParams.get("code");
 		if (!code) return fail(400, "Sign-in was not completed", "The sign-in page returned without an approval.");
 		const tokens = await this.token({
@@ -209,7 +222,7 @@ export class Sessions {
 			// The sheet hands the app a one-time code, never the session id itself.
 			const handoff = randomId();
 			await this.store.put(`handoff:${handoff}`, { session: id, challenge: started.app, at: this.now() });
-			return redirect(`${APP_REDIRECT}?code=${handoff}`, [clear]);
+			return redirect(`${this.appRedirect}?code=${handoff}`, [clear]);
 		}
 		return redirect(started.next, [cookie(COOKIE, id, SESSION_MS / 1000), clear]);
 	}

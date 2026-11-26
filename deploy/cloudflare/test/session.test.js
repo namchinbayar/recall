@@ -2,8 +2,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { APP_HEADER, APP_REDIRECT, COOKIE, EXCHANGE_PATH, LOGIN_COOKIE, Sessions, Unavailable, challengeFor, cookiesOf, safeNext } from "../src/session.js";
+import { APP_HEADER, COOKIE, EXCHANGE_PATH, LOGIN_COOKIE, Sessions, Unavailable, appRedirectOf, challengeFor, cookiesOf, safeNext } from "../src/session.js";
 
+const APP_REDIRECT = "com.example.recall://signed-in";
 const ISSUER = "https://auth.example/v1/apps/P1";
 const RESOURCE = "https://recall.example/mcp";
 const ORIGIN = "https://recall.example";
@@ -27,7 +28,7 @@ class Store {
 }
 
 // A stand-in for the authorization server. Refresh tokens work once, as with rotation.
-function setup({ allowed = async () => "U-me" } = {}) {
+function setup({ allowed = async () => "U-me", appRedirect = APP_REDIRECT } = {}) {
 	const world = { store: new Store(), now: 1_000_000_000_000, calls: [], refreshTokens: new Set(), issued: 0, revoked: [] };
 	world.fetch = async (url, init = {}) => {
 		const path = new URL(url).pathname;
@@ -61,7 +62,7 @@ function setup({ allowed = async () => "U-me" } = {}) {
 		return new Response("not found", { status: 404 });
 	};
 	world.sessions = new Sessions({
-		store: world.store, issuer: ISSUER + "/", resource: RESOURCE, allowed, fetch: world.fetch, now: () => world.now,
+		store: world.store, issuer: ISSUER + "/", resource: RESOURCE, allowed, appRedirect, fetch: world.fetch, now: () => world.now,
 	});
 	return world;
 }
@@ -318,6 +319,42 @@ test("an app sign-in with a malformed challenge does not start", async () => {
 	const resp = await world.sessions.handle(get("/auth/login?app=short"));
 	assert.equal(resp.status, 400);
 	assert.equal((await world.store.list({ prefix: "login:" })).size, 0);
+});
+
+test("without the app's address set, the app cannot sign in and the web app still can", async () => {
+	const world = setup({ appRedirect: null }); // as when RECALL_APP_REDIRECT is not set
+	const resp = await world.sessions.handle(get(`/auth/login?app=${await challengeFor(APP_VERIFIER)}`));
+	assert.equal(resp.status, 404);
+	assert.equal((await world.store.list({ prefix: "login:" })).size, 0);
+	const { back, id } = await signIn(world);
+	assert.equal(back.status, 302);
+	assert.ok(id);
+});
+
+test("an app sign-in under way when the address is taken away ends without a session", async () => {
+	const world = setup();
+	const start = await world.sessions.handle(get(`/auth/login?app=${await challengeFor(APP_VERIFIER)}`));
+	const state = new URL(start.headers.get("location")).searchParams.get("state");
+	world.sessions.appRedirect = null;
+	const back = await world.sessions.handle(get(`/auth/callback?code=good-code&state=${state}`, `${LOGIN_COOKIE}=${state}`));
+	assert.equal(back.status, 404);
+	assert.equal((await world.store.list({ prefix: "session:" })).size, 0);
+	assert.equal((await world.store.list({ prefix: "handoff:" })).size, 0);
+});
+
+test("only an address an installed app can claim is taken as the app's", () => {
+	assert.equal(appRedirectOf("com.example.recall://signed-in"), "com.example.recall://signed-in");
+	assert.equal(appRedirectOf("com.example.recall://"), "com.example.recall://");
+	for (const bad of [
+		undefined, "", 7, "https://evil.example/signed-in", "http://recall.example/", "recall://signed-in",
+		"javascript://x", "data://x", "com.example.recall:signed-in", "com.example.recall://signed-in?next=1",
+		"com.example.recall://signed-in#x", "com.example.recall://a b", " com.example.recall://signed-in",
+		"com.example.recall://signed-in\nlocation: https://evil.example",
+	]) {
+		assert.equal(appRedirectOf(bad), null, String(bad));
+	}
+	const world = setup({ appRedirect: "https://evil.example/signed-in" });
+	assert.equal(world.sessions.appRedirect, null);
 });
 
 test("a code the app never collects is cleared out with its session", async () => {

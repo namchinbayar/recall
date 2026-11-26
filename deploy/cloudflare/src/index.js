@@ -40,6 +40,7 @@ export class RecallServer extends DurableObject {
 				store: ctx.storage,
 				issuer: env.RECALL_ONLINE_ISSUER,
 				resource: env.RECALL_ONLINE_URL,
+				appRedirect: env.RECALL_APP_REDIRECT,
 				allowed: (token) => this.userOf(token),
 			});
 		}
