@@ -173,6 +173,50 @@ systemctl --user daemon-reload
 systemctl --user enable --now recall-sessions.service
 ```
 
+## Open items
+
+Every session note ends with a "Still open" list, and `recall catch-up`, the `open_items`
+request and anything built on them show those lists. A note is a record of its day and is
+never rewritten, so an item stayed on its list after a later session did it.
+
+`recall-sessions.service` now settles them. After each pass it shows every new session note
+(Claude Code and Hermes) to the model next to the items earlier sessions left open, and asks
+which of them this session settled:
+
+- **done**: the note shows the thing was done.
+- **dropped**: it was decided against, or what it concerns was removed or replaced.
+- **carried**: the note lists the same thing again as still open, so the older copy goes and
+  the newer one stands.
+
+```bash
+recall open                        # what is open now, by session, each item with its id
+recall open --closed               # the latest closures: how, why, the words quoted, the session that did it
+recall open --done open:1a2b3c4d5e6f --why "did it by hand"
+recall open --reopen open:1a2b3c4d5e6f
+recall open --settle --since 14d --dry-run   # how many notes would be asked about, and the cost
+recall open --settle --since 14d             # reach back once; the service only looks at the last 3 days
+```
+
+What the model may decide, and what code decides:
+
+- The model sees one note and at most 40 open items: those of earlier notes (up to 60 days
+  older) from the same folder, and those of notes close to it in meaning.
+- Code accepts a closure only for an item that was shown, with a reason, and with words
+  quoted from the note that are really in the note. A second call then looks at each proposed
+  closure alone and must agree; "work on the same subject" and "partly done" are a no.
+- At most eight closures per note. A note is looked at once, and again if its session
+  continues and the note is rewritten.
+- The notes are never changed, so a search still finds what was open on that day. Closures
+  live apart in the `open_items` collection; `--reopen` deletes one and the item is back.
+
+An item is open while its note still lists it and no closure exists for it. That only takes
+off what a later note shows was settled. On the first run over 14 days of notes (97 notes,
+294 items) it closed 31 items, 21 of them from that window; most of what stayed is a step
+only the owner can take or a caveat no session came back to, and those leave the list with
+`--done` or when they age out of the window. One note costs
+about 6,000 tokens in (a cent or two on Sonnet 5.5, less on Haiku), with the same model
+setting as `recall learn` (`RECALL_LEARN_MODEL`, else `RECALL_SUMMARY_MODEL`).
+
 ## Health check
 
 `recall doctor` checks every part and prints one line each: the services are

@@ -363,11 +363,20 @@ def test_open_items_groups_notes_newest_first():
         seen["since"] = since
         return data
 
-    out = serve.open_items(None, {"days": 999}, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=load)
+    out = serve.open_items(None, {"days": 999}, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=load,
+                           closed=lambda settings, ids: set())
     assert out["days"] == 90 and seen["since"] == datetime(2026, 8, 16, tzinfo=timezone.utc)
     assert [n["source"] for n in out["notes"]] == ["session:b", "session:a"]
     assert out["notes"][0]["title"] == "Newer work" and out["notes"][0]["kind"] == "claude"
     assert out["notes"][0]["items"][0] == "Nothing is merged to GitHub."
+    assert out["notes"][0]["ids"][0].startswith("open:") and len(out["notes"][0]["ids"]) == len(out["notes"][0]["items"])
+
+    # an item a later session settled leaves the list, and a note with nothing left leaves with it
+    gone = set(out["notes"][0]["ids"]) | {out["notes"][1]["ids"][0]}
+    after = serve.open_items(None, {"days": 999}, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=load,
+                             closed=lambda settings, ids: gone & set(ids))
+    assert [n["source"] for n in after["notes"]] == ["session:a"]
+    assert after["notes"][0]["items"] == out["notes"][1]["items"][1:]
 
 
 def test_answer_routes_open_items(monkeypatch):
@@ -411,10 +420,11 @@ def test_catch_up_lists_every_session_newest_first_with_what_it_left_open():
             + rows("session:hermes:b", "Session: Chat with Hermes (2026-11-12)", 12, "## Done\n- all", ("session-note", "hermes")))
     profile = {"text": "**Who he is**\n- Sam.", "written": datetime(2026, 11, 13, tzinfo=timezone.utc)}
     text = serve.catch_up(None, 7, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=lambda s, d: data,
-                          load_profile=lambda s: profile)
+                          load_profile=lambda s: profile, closed=lambda s, ids: set())
     assert text.startswith("# Who the user is (profile written 2026-11-13)\n**Who he is**")
     chat, older = text.index("Chat with Hermes"), text.index("Older work")
     assert chat < older and "(Hermes; session:hermes:b)" in text and "(/srv/proj; session:a)" in text
     assert "    open: Nothing is pushed to GitHub." in text
-    bare = serve.catch_up(None, 7, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=lambda s, d: [], with_profile=False)
+    bare = serve.catch_up(None, 7, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=lambda s, d: [], with_profile=False,
+                          closed=lambda s, ids: set())
     assert "Who the user is" not in bare and "none" in bare

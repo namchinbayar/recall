@@ -53,8 +53,9 @@ paste them into a prompt (the private homepage's detail drawers).
 
 `open_items` reads the session notes of the last `days` days (default 14, at
 most 90), newest first, and returns the bullets under each note's "## Still
-open" heading: {"ok": true, "notes": [{source, title, date, folder, kind,
-items: [...]}]}. Notes with nothing open are left out. It only reads.
+open" heading, without the ones a later session settled (openitems.py):
+{"ok": true, "notes": [{source, title, date, folder, kind, items: [...],
+ids: [...]}]}. Notes with nothing open are left out. It only reads.
 """
 
 from __future__ import annotations
@@ -69,7 +70,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import search
+from . import openitems, search
+from .openitems import rejoin, still_open  # noqa: F401  (their old home; other modules and tests reach them here)
 from .agent.tools import excerpt
 from .config import Settings
 from .stream import spool
@@ -206,44 +208,7 @@ def status(settings: Settings) -> dict:
 
 OPEN_DAYS = (1, 90, 14)      # (min, max, default) for open_items
 OPEN_LIMIT = (1, 100, 30)
-_HEADING = re.compile(r"^##\s+(.+?)\s*$")
 _TITLE_DAY = re.compile(r"\s*\(\d{4}-\d{2}-\d{2}\)$")
-
-
-def rejoin(pieces: list[str]) -> str:
-    """A note's chunks back into one text. chunk.split starts each chunk after the first with
-    the previous chunk's last OVERLAP characters, so that repeat is dropped where it is found."""
-    from .chunk import OVERLAP
-
-    text = pieces[0] if pieces else ""
-    for prev, piece in zip(pieces, pieces[1:]):
-        tail = prev[-OVERLAP:]
-        if piece.startswith(tail):
-            piece = piece[len(tail):].lstrip("\n")
-            text = f"{text}\n\n{piece}" if piece else text
-        else:
-            text = f"{text}\n\n{piece}"
-    return text
-
-
-def still_open(note: str) -> list[str]:
-    """The bullets under a note's "## Still open" heading; a wrapped line joins its bullet."""
-    items: list[str] = []
-    inside = False
-    for raw in note.splitlines():
-        line = raw.strip()
-        if m := _HEADING.match(line):
-            inside = m.group(1).strip().lower() == "still open"
-            continue
-        if not inside or not line:
-            continue
-        if line[:2] in ("- ", "* "):
-            items.append(line[2:].strip())
-        elif items:
-            items[-1] = f"{items[-1]} {line}"
-        else:
-            items.append(line)
-    return [i for i in items if i]
 
 
 def _bounded(req: dict, key: str, bounds: tuple[int, int, int]) -> int:
@@ -255,35 +220,30 @@ def _bounded(req: dict, key: str, bounds: tuple[int, int, int]) -> int:
 
 
 def open_items(settings: Settings, req: dict, now: datetime | None = None,
-               load: Callable[[Settings, datetime], list[dict]] | None = None) -> dict:
-    """What recent session notes left open. Read only; vault entries are never session notes."""
+               load: Callable[[Settings, datetime], list[dict]] | None = None,
+               closed: Callable[[Settings, list[str]], set[str]] | None = None) -> dict:
+    """What recent session notes left open and no later session settled (openitems.py). Read
+    only; vault entries are never session notes. `ids` runs parallel to `items`."""
     from datetime import timedelta
 
     days, limit = _bounded(req, "days", OPEN_DAYS), _bounded(req, "limit", OPEN_LIMIT)
     since = (now or datetime.now(timezone.utc)) - timedelta(days=days)
-    rows = (load or _note_chunks)(settings, since)
-    by_source: dict[str, list[dict]] = {}
-    for r in rows:
-        by_source.setdefault(r["source"], []).append(r)
+    sessions = openitems.read_notes((load or _note_chunks)(settings, since))
+    ids = [i.id for s in sessions for i in s.items]
+    gone = (closed or openitems.closed_ids)(settings, ids) if ids else set()
     notes = []
-    for source, parts in by_source.items():
-        parts.sort(key=lambda r: r.get("chunk_index", 0))
-        items = still_open(rejoin([p.get("text", "") for p in parts]))
-        if not items:
+    for s in sessions:
+        left = [i for i in s.items if i.id not in gone]
+        if not left:
             continue
-        first = parts[0]
-        made = first.get("created_at")
-        if isinstance(made, datetime) and made.tzinfo is None:
-            made = made.replace(tzinfo=timezone.utc)
-        tags = set(first.get("tags") or [])
-        cwd = ((first.get("session") or {}).get("cwd") or "").replace(str(Path.home()), "~") or None
         notes.append({
-            "source": source,
-            "title": _TITLE_DAY.sub("", (first.get("title") or "").removeprefix("Session: ")).strip() or source,
-            "date": made.isoformat() if isinstance(made, datetime) else None,
-            "folder": cwd,
-            "kind": "hermes" if "hermes" in tags else "claude",
-            "items": items,
+            "source": s.source,
+            "title": _TITLE_DAY.sub("", s.title.removeprefix("Session: ")).strip() or s.source,
+            "date": s.when.isoformat() if s.when else None,
+            "folder": s.folder,
+            "kind": s.kind,
+            "items": [i.text for i in left],
+            "ids": [i.id for i in left],
         })
     notes.sort(key=lambda n: n["date"] or "", reverse=True)
     return {"ok": True, "days": days, "notes": notes[:limit]}
@@ -291,7 +251,8 @@ def open_items(settings: Settings, req: dict, now: datetime | None = None,
 
 def catch_up(settings: Settings, days: int = 7, now: datetime | None = None, with_profile: bool = True,
              load: Callable[[Settings, datetime], list[dict]] | None = None,
-             load_profile: Callable[[Settings], dict | None] | None = None) -> str:
+             load_profile: Callable[[Settings], dict | None] | None = None,
+             closed: Callable[[Settings, list[str]], set[str]] | None = None) -> str:
     """Plain text for an assistant picking up where the user's others left off: the profile,
     then every session note of the last `days` days (Claude Code and Hermes alike),
     newest first, each with what it left open."""
@@ -302,7 +263,7 @@ def catch_up(settings: Settings, days: int = 7, now: datetime | None = None, wit
     days = min(max(int(days), 1), 60)
     now = now or datetime.now(timezone.utc)
     rows = (load or _note_chunks)(settings, now - timedelta(days=days))
-    opened = {n["source"]: n for n in open_items(settings, {"days": days, "limit": 500}, now, lambda s, d: rows)["notes"]}
+    opened = {n["source"]: n for n in open_items(settings, {"days": days, "limit": 500}, now, lambda s, d: rows, closed)["notes"]}
     firsts: dict[str, dict] = {}
     for r in rows:
         if r["source"] not in firsts or r.get("chunk_index", 0) < firsts[r["source"]].get("chunk_index", 0):

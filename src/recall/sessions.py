@@ -491,7 +491,10 @@ def run_pass(settings: Settings, summarize: Callable, echo: Callable[[str], None
 
 
 def run_loop(settings: Settings, interval: int, idle: int, echo: Callable[[str], None]) -> None:
+    from . import openitems
+
     summarize, usage, model = make_summarizer()
+    settler = openitems.Settler(settings)
     echo(f"watching {', '.join(str(r) for r in roots())} (model {model}, idle {idle} min)")
     while True:
         before = usage["calls"]
@@ -499,6 +502,10 @@ def run_loop(settings: Settings, interval: int, idle: int, echo: Callable[[str],
             run_pass(settings, summarize, echo, idle=idle)
         except Exception as exc:  # a database or disk hiccup should not end the loop
             echo(f"sessions: pass failed ({type(exc).__name__}: {exc})")
+        try:        # which earlier "Still open" items did the new notes settle (Hermes notes included)
+            settler.run(echo)
+        except Exception as exc:
+            echo(f"sessions: open items not settled ({type(exc).__name__}: {exc})")
         if usage["calls"] > before:
             echo(f"sessions: {usage['calls']} model call(s) so far, {usage['input']:,} tokens in, {usage['output']:,} out")
         time.sleep(interval)
