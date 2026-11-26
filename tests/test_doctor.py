@@ -139,3 +139,25 @@ def test_online_checks_the_hosted_health_route_and_is_skipped_without_a_url():
     assert doctor.check_online(url, answer(503, {"ok": False})).failed
     assert doctor.check_online(url, answer(200, {"ok": False})).failed
     assert doctor.check_online(url, down).failed
+
+
+def test_an_alert_opens_the_hosted_recall_when_its_address_is_known(monkeypatch):
+    posted = []
+
+    class Ok:
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(doctor.httpx, "post", lambda url, **kw: posted.append(kw["json"]) or Ok())
+    monkeypatch.setenv("BARK_KEY", "devicekey")
+    for name in ("BARK_ENC_KEY", "BARK_URL", "RECALL_ONLINE_HEALTHZ", "RECALL_ONLINE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    doctor.push("recall: 1 problem", "atlas: down")
+    assert "url" not in posted[-1]                      # no address set: no link, and no made-up one
+    monkeypatch.setenv("RECALL_ONLINE_URL", "https://name.example/mcp")
+    doctor.push("recall: 1 problem", "atlas: down")
+    assert posted[-1]["url"] == "https://name.example/"
+    monkeypatch.setenv("RECALL_ONLINE_HEALTHZ", "https://other.example/healthz")
+    assert doctor.app_url() == "https://other.example/"  # what the doctor itself checks comes first
+    monkeypatch.setenv("RECALL_ONLINE_HEALTHZ", "http://127.0.0.1:8791/healthz")
+    assert doctor.app_url() == "https://name.example/"   # a local address is not one a phone can open

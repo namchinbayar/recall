@@ -2,12 +2,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { APP_HEADER, APP_REDIRECT, COOKIE, EXCHANGE_PATH, LOGIN_COOKIE, Sessions, Unavailable, challengeFor, cookiesOf, safeNext } from "../src/session.js";
+import { APP_HEADER, COOKIE, EXCHANGE_PATH, LOGIN_COOKIE, Sessions, Unavailable, challengeFor, cookiesOf, safeNext } from "../src/session.js";
 
 const ISSUER = "https://auth.example/v1/apps/P1";
 const RESOURCE = "https://recall.example/mcp";
 const ORIGIN = "https://recall.example";
 const HOUR = 60 * 60 * 1000;
+const APP_REDIRECT = "com.example.recall://signed-in";
 const DAY = 24 * HOUR;
 
 class Store {
@@ -27,7 +28,7 @@ class Store {
 }
 
 // A stand-in for the authorization server. Refresh tokens work once, as with rotation.
-function setup({ allowed = async () => "U-me" } = {}) {
+function setup({ allowed = async () => "U-me", appRedirect = APP_REDIRECT } = {}) {
 	const world = { store: new Store(), now: 1_000_000_000_000, calls: [], refreshTokens: new Set(), issued: 0, revoked: [] };
 	world.fetch = async (url, init = {}) => {
 		const path = new URL(url).pathname;
@@ -61,7 +62,7 @@ function setup({ allowed = async () => "U-me" } = {}) {
 		return new Response("not found", { status: 404 });
 	};
 	world.sessions = new Sessions({
-		store: world.store, issuer: ISSUER + "/", resource: RESOURCE, allowed, fetch: world.fetch, now: () => world.now,
+		store: world.store, issuer: ISSUER + "/", resource: RESOURCE, allowed, appRedirect, fetch: world.fetch, now: () => world.now,
 	});
 	return world;
 }
@@ -275,6 +276,16 @@ test("the app's sign-in comes back to the app with a one-time code, not a sessio
 	assert.ok(back.headers.get("location").startsWith(APP_REDIRECT + "?code="));
 	assert.equal(cookieValue(back, COOKIE), undefined);
 	assert.match(code, /^[A-Za-z0-9_-]{40,}$/);
+});
+
+test("without an address to return to, the app's sign-in is off and the web sign-in is not", async () => {
+	for (const appRedirect of ["", null, "not an address", "com.example.recall://x y"]) {
+		const world = setup({ appRedirect });
+		const start = await world.sessions.handle(get(`/auth/login?app=${await challengeFor(APP_VERIFIER)}`));
+		assert.equal(start.status, 404);
+		assert.equal([...world.store.data.keys()].length, 0); // nothing was started
+		assert.equal((await signIn(world)).id.length > 20, true);
+	}
 });
 
 test("the code and the app's verifier give the session once; the session then works like the web app's", async () => {

@@ -26,6 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -291,6 +292,16 @@ def _seal(payload: dict, key: str) -> dict:
     return {"ciphertext": base64.b64encode(enc.update(data) + enc.finalize()).decode(), "iv": iv}
 
 
+def app_url() -> str | None:
+    """The hosted recall's address, for an alert to open: taken from the settings that already
+    hold it (RECALL_ONLINE_HEALTHZ here, RECALL_ONLINE_URL on the machine that serves it)."""
+    for name in ("RECALL_ONLINE_HEALTHZ", "RECALL_ONLINE_URL"):
+        parts = urlsplit(os.environ.get(name, "").strip())
+        if parts.scheme == "https" and parts.netloc:
+            return f"https://{parts.netloc}/"
+    return None
+
+
 def push(title: str, body: str) -> str:
     """Send to the phone through Bark. Returns how it went out: 'bark', 'desktop' or 'failed'.
 
@@ -301,9 +312,11 @@ def push(title: str, body: str) -> str:
     bark_key = os.environ.get("BARK_KEY")
     if bark_key:
         payload = {
-            "title": title[:250], "body": body[:1024], "group": "recall", "url": "https://recall.example.com/",
+            "title": title[:250], "body": body[:1024], "group": "recall",
             "level": "timeSensitive" if title.startswith(CALM_TITLES) else "critical",
         }
+        if url := app_url():
+            payload["url"] = url        # tapping the alert opens recall
         try:
             enc_key = os.environ.get("BARK_ENC_KEY")
             if enc_key:

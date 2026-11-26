@@ -21,6 +21,8 @@ fi
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "uncommitted changes; commit them first so the deploy is a known commit" >&2; exit 1
 fi
+# Fail now, before the build, if the settings cannot say where to deploy.
+python3 deploy_config.py --check
 commit=$(git rev-parse --short=12 HEAD)
 # After changing only a secret, RECALL_RESTART=1 restarts the container on the same commit.
 release=$commit
@@ -37,16 +39,9 @@ wrangler containers registries credentials registry.cloudflare.com --push 2>/dev
   | podman login --username v1 --password-stdin registry.cloudflare.com
 podman push --format v2s2 --digestfile "$work/digest" "$image"
 
-# The deploy config: wrangler.jsonc with the image replaced by the pushed one (not tracked).
-python3 - "$account" "$(cat "$work/digest")" "$release" <<'PY'
-import json, re, sys
-account, digest, release = sys.argv[1:4]
-cfg = json.loads(re.sub(r"^\s*//.*$", "", open("wrangler.jsonc").read(), flags=re.M))
-cfg.pop("$schema", None)
-cfg["vars"]["RELEASE"] = release
-cfg["containers"][0]["images"]["base"] = {"image": f"registry.cloudflare.com/{account}/recall-online@{digest}"}
-json.dump(cfg, open("wrangler.deploy.jsonc", "w"), indent="\t")
-PY
+# The deploy config: wrangler.jsonc with the pushed image, RELEASE and the public name (the host
+# of RECALL_ONLINE_URL in settings.local.json) filled in. Not tracked.
+python3 deploy_config.py "$account" "$(cat "$work/digest")" "$release"
 
 wrangler deploy -c wrangler.deploy.jsonc --secrets-file settings.local.json \
   --tag "$commit" --message "$(git log -1 --format=%s | cut -c1-100)"

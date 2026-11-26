@@ -25,7 +25,7 @@ const SETTINGS = [
 	"RECALL_ONLINE_URL", "RECALL_ONLINE_ISSUER", "RECALL_ONLINE_SUBJECTS",
 	"MONGODB_URI", "MONGODB_USERNAME", "MONGODB_PASSWORD",
 	"VOYAGE_API_KEY", "VOYAGE_MODEL", "VOYAGE_BASE_URL", "RECALL_DB",
-	"RECALL_VAULT_SECRET", "RECALL_AGENT_KEYS", "RECALL_OWNER",
+	"RECALL_VAULT_SECRET", "RECALL_AGENT_KEYS", "RECALL_OWNER", "RECALL_TZ", "TZ",
 ];
 
 export class RecallServer extends DurableObject {
@@ -40,6 +40,7 @@ export class RecallServer extends DurableObject {
 				store: ctx.storage,
 				issuer: env.RECALL_ONLINE_ISSUER,
 				resource: env.RECALL_ONLINE_URL,
+				appRedirect: env.RECALL_APP_REDIRECT,
 				allowed: (token) => this.userOf(token),
 			});
 		}

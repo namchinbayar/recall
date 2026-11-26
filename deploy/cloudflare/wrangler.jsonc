@@ -9,6 +9,7 @@
 	"workers_dev": false,
 	"preview_urls": false,
 	// The public name, as a Worker custom domain: Cloudflare creates and owns its DNS record.
+	// A placeholder: deploy.sh replaces it with the host of RECALL_ONLINE_URL from settings.local.json.
 	"routes": [{ "pattern": "recall.example.com", "custom_domain": true }],
 	"observability": { "enabled": true },
 	// The recall app: the files in ./app, served by Cloudflare without running the Worker.

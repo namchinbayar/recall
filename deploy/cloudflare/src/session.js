@@ -18,8 +18,10 @@ export const LOGIN_COOKIE = "__Host-recall-login";
 export const CLIENT_PATH = "/oauth/client.json";
 export const CALLBACK_PATH = "/auth/callback";
 export const APP_HEADER = "x-recall-app";
-// The iPhone app signs in through the system sign-in sheet, which comes back to this address.
-export const APP_REDIRECT = "com.example.recall://signed-in";
+// The iPhone app signs in through the system sign-in sheet, which comes back to the app's own
+// address (RECALL_APP_REDIRECT, such as com.example.recall://signed-in). It is a setting, so the
+// app's identifier is not in this repository; without it the app's sign-in is off.
+const APP_ADDRESS = /^[a-z][a-z0-9+.-]*:\/\/[^\s?#]+$/i;
 export const EXCHANGE_PATH = "/auth/app/exchange";
 
 const AGENT = "recall-online"; // Descope refuses some default user agents
@@ -93,8 +95,12 @@ export class Sessions {
 	// store: get/put/delete/list as on Durable Object storage. issuer: the authorization
 	// server. resource: recall's public MCP address, which is also the token audience.
 	// allowed(token): resolves to the user id when recall accepts the token, else null.
-	constructor({ store, issuer, resource, allowed, fetch = globalThis.fetch.bind(globalThis), now = Date.now }) {
+	// appRedirect: where the iPhone app's sign-in returns to; empty turns that sign-in off.
+	constructor({ store, issuer, resource, allowed, appRedirect = "", fetch = globalThis.fetch.bind(globalThis), now = Date.now }) {
 		Object.assign(this, { store, issuer: String(issuer).replace(/\/+$/, ""), resource, allowed, fetch, now });
+		const address = String(appRedirect ?? "").trim();
+		if (address && !APP_ADDRESS.test(address)) console.warn("RECALL_APP_REDIRECT is not an address like com.example.recall://signed-in; the app's sign-in is off");
+		this.appRedirect = APP_ADDRESS.test(address) ? address : "";
 		this.origin = new URL(resource).origin;
 	}
 
@@ -156,6 +162,7 @@ export class Sessions {
 	async login(url) {
 		const app = url.searchParams.get("app");
 		if (app !== null && !CHALLENGE.test(app)) return page(400, "That sign-in could not start", "The app sent a sign-in request this site does not understand.");
+		if (app !== null && !this.appRedirect) return page(404, "That sign-in is not set up", "This site has no address to return to the app (RECALL_APP_REDIRECT).");
 		const { authorization_endpoint: authorize } = await this.endpoints();
 		const state = randomId();
 		const verifier = randomId(48);
@@ -209,7 +216,7 @@ export class Sessions {
 			// The sheet hands the app a one-time code, never the session id itself.
 			const handoff = randomId();
 			await this.store.put(`handoff:${handoff}`, { session: id, challenge: started.app, at: this.now() });
-			return redirect(`${APP_REDIRECT}?code=${handoff}`, [clear]);
+			return redirect(`${this.appRedirect}?code=${handoff}`, [clear]);
 		}
 		return redirect(started.next, [cookie(COOKIE, id, SESSION_MS / 1000), clear]);
 	}

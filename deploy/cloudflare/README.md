@@ -22,7 +22,7 @@ For the recall app the Worker also does the sign-in (`src/session.js`):
 - `POST /auth/logout` ends the session and revokes its refresh token.
 - The iPhone app (`the companion iOS app`) signs in through the system sign-in sheet:
   `GET /auth/login?app=<challenge>` runs the same sign-in, but the callback sends the
-  sheet to `com.example.recall://signed-in?code=…` with a one-time code instead of setting
+  sheet to the app's own address (`RECALL_APP_REDIRECT`) with `?code=…`, a one-time code, instead of setting
   the cookie. The app posts that code and the verifier behind its challenge to
   `POST /auth/app/exchange` (with the `X-Recall-App` header) within two minutes and gets
   the session id, which it then sends as the `__Host-recall` cookie. A wrong verifier
@@ -43,16 +43,20 @@ node preview.mjs --api http://127.0.0.1:8791 --token <token>   # against a real 
 `node --test deploy/cloudflare/test/*.js` runs the sign-in tests and checks that the app's
 files, the offline list and the Worker's paths agree.
 
-Settings are Worker secrets, none are in this repository:
+Settings are Worker secrets, none are in this repository. The ones that are not secret go
+in `settings.local.json` next to `deploy.sh` (not tracked; a JSON object of names and
+values), which each deploy hands to wrangler:
 
 | Name | What |
 |---|---|
-| `RECALL_ONLINE_URL`, `RECALL_ONLINE_ISSUER`, `RECALL_ONLINE_SUBJECTS` | as in the main README, "Online" |
+| `RECALL_ONLINE_URL`, `RECALL_ONLINE_ISSUER`, `RECALL_ONLINE_SUBJECTS` | as in the main README, "Online". The host of `RECALL_ONLINE_URL` is also the Worker's public name: `deploy.sh` reads it from `settings.local.json`, so the name is set in one place and `wrangler.jsonc` holds only a placeholder |
 | `MONGODB_URI` | the cluster address without a login |
 | `MONGODB_USERNAME`, `MONGODB_PASSWORD` | a database user limited to the recall database |
 | `VOYAGE_API_KEY`, `VOYAGE_MODEL` | embeddings |
 | `RECALL_AGENT_KEYS` | `name:<sha256 of the key>` per agent key (not secret: only hashes); main README, "Online" |
 | `RECALL_OWNER` | optional: your name, as the `remember` example should write it; main README, "Learning from Hermes conversations" |
+| `RECALL_APP_REDIRECT` | optional: where the iPhone app's sign-in returns to, such as `com.example.recall://signed-in`. Without it that sign-in is off (`/auth/login?app=` answers 404); the web app's sign-in is unaffected |
+| `RECALL_TZ`, `TZ` | optional: the time zone dates are read and shown in, when it is not the image's own |
 
 The container's outbound address is not fixed, so the database's IP access list
 must allow any address; the database user's password is then the lock.
