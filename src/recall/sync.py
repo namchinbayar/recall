@@ -187,6 +187,15 @@ def find_secret(text: str) -> str | None:
     return f"{kind}, line {text.count(chr(10), 0, at) + 1}"
 
 
+def refuse_secret(text: str) -> None:
+    """For what an assistant or the app saves directly (a memory, a note): raise rather than store a secret."""
+    if found := find_secret(text):
+        raise ValueError(
+            f"not saved: this looks like it holds a secret ({found}). Everything in recall can be read by "
+            "the assistants that search it; the vault is the place for it."
+        )
+
+
 def _digest(data: bytes, watch: Watch) -> str:
     """Content plus the title and tags from the config, so retagging a watch re-saves its files."""
     h = hashlib.sha256(data)

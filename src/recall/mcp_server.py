@@ -184,7 +184,7 @@ def save_note(
     """Save a piece of text as its own source, e.g. a decision summary or a snippet."""
     try:
         source, n = ingest.ingest_text(_settings(), text, title, tags)
-    except SystemExit as exc:
+    except (SystemExit, ValueError) as exc:
         raise ToolError(str(exc)) from None
     return f"stored {n} chunk(s) as {source}"
 

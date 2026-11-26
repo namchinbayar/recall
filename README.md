@@ -45,6 +45,7 @@ uv run recall add https://example.com/some-article --tag reading
 uv run recall add ~/notes/niri.md --tag desktop --tag config
 cat snippet.txt | uv run recall add - --title "that snippet"
 uv run recall add paper.pdf
+uv run recall add https://example.com/paper.pdf   # a PDF at a URL is read as a PDF
 
 uv run recall search "how does the compositor reload its config"
 uv run recall search "sleep tracking" --tag health -n 10 --full
@@ -368,7 +369,9 @@ by the main instance, so turn those off for the profile.
   words: names, ids, error strings), reranks them with Voyage `rerank-3`, and
   adds a small recency bonus (`RECALL_RECENCY_WEIGHT`, default 0.05, halving
   every `RECALL_RECENCY_HALF_LIFE_DAYS`, default 30) so the newer of two
-  equally relevant chunks wins. `recall init` creates both indexes. Without
+  equally relevant chunks wins. `recall init` creates both indexes, and the
+  plain index on tag and date that the lists and counts (memories, events,
+  session notes) read from; run it again after an update that adds one. Without
   the text index it falls back to vector search alone and says so on stderr;
   `RECALL_RERANK_MODEL=` (empty) turns reranking off. Scores shown are rerank
   relevance (0 to 1) plus the bonus.
@@ -387,6 +390,16 @@ Document shape:
   "created_at": ISODate
 }
 ```
+
+## Tests
+
+```bash
+uv run pytest -q                           # recall itself
+node --test deploy/cloudflare/test/*.js    # the Worker's sign-in and the app's files
+```
+
+Neither needs a database, a key or the network. `.github/workflows/tests.yml` runs both
+on every pull request and on main.
 
 ## Do not change later without re-embedding
 
@@ -536,6 +549,11 @@ its own copy. Tools: `profile`, `catch_up`, `search`, `remember`, `forget`, `lis
 `metrics_summary`, `metrics_manual`, `record_metric`. They share their code
 with the `recall chat` agent. The vault is not reachable: search excludes it
 and no tool touches it.
+
+`remember` and `save_note` refuse text that looks like it holds a secret (the same
+patterns folder sync uses), here, online and in the app, and say which kind and on
+which line; such things belong in the vault. `recall add` does not check: a page or
+file you add yourself often shows an example key or connection string.
 
 Results are kept small for the calling model's context: `search` returns 5
 hits as 700-character excerpts around the matching words (`full=true` for

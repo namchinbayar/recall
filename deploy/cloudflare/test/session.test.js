@@ -1,8 +1,8 @@
-// Run with: node --test deploy/cloudflare/test/
+// Run with: node --test deploy/cloudflare/test/*.js
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { APP_HEADER, APP_REDIRECT, COOKIE, EXCHANGE_PATH, LOGIN_COOKIE, Sessions, challengeFor, cookiesOf, safeNext } from "../src/session.js";
+import { APP_HEADER, APP_REDIRECT, COOKIE, EXCHANGE_PATH, LOGIN_COOKIE, Sessions, Unavailable, challengeFor, cookiesOf, safeNext } from "../src/session.js";
 
 const ISSUER = "https://auth.example/v1/apps/P1";
 const RESOURCE = "https://recall.example/mcp";
@@ -45,6 +45,7 @@ function setup({ allowed = async () => "U-me" } = {}) {
 			return new Response(null, { status: 200 });
 		}
 		if (path === "/token") {
+			if (world.down) return new Response("try later", { status: world.down });
 			const grant = form.get("grant_type");
 			if (grant === "authorization_code") {
 				if (form.get("code") !== "good-code" || (await challengeFor(form.get("code_verifier"))) !== world.challenge) {
@@ -176,6 +177,20 @@ test("when the refresh is refused the session ends", async () => {
 	world.now += HOUR;
 	assert.equal(await world.sessions.access(get("/api/v1/me", `${COOKIE}=${id}`)), null);
 	assert.equal(await world.store.get(`session:${id}`), undefined);
+});
+
+test("when the sign-in service fails to answer, the session is kept", async () => {
+	const world = setup();
+	const { id } = await signIn(world);
+	const request = () => world.sessions.access(get("/api/v1/me", `${COOKIE}=${id}`));
+	world.down = 503;
+	world.now += HOUR - 30_000; // about to expire: the token in hand is still used
+	assert.equal((await request()).token, "access-1");
+	world.now += 60_000; // expired: nothing to answer with, but not signed out either
+	await assert.rejects(request(), Unavailable);
+	assert.equal((await world.store.get(`session:${id}`)).refresh, "refresh-1");
+	world.down = 0;
+	assert.equal((await request()).token, "access-2");
 });
 
 test("use is recorded hourly and renews the cookie; a month unused ends the session", async () => {

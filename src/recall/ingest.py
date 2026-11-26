@@ -21,7 +21,12 @@ def ingest(
 
 
 def ingest_text(settings: Settings, text: str, title: str, tags: list[str] | None = None) -> tuple[str, int]:
-    """Store a piece of text (a note, a snippet). The same text saved twice replaces itself."""
+    """Store a piece of text (a note, a snippet). The same text saved twice replaces itself.
+    A note that looks like it holds a secret is refused (ValueError), as sync refuses such a file."""
+    from . import sync   # sync imports this module
+
+    sync.refuse_secret(title)
+    sync.refuse_secret(text)
     digest = hashlib.sha256(text.strip().encode()).hexdigest()[:12]
     return store(settings, f"note:{digest}", title.strip() or f"note {digest}", text, tags)
 

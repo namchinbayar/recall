@@ -25,6 +25,7 @@ SPOOL = Path(os.environ.get("RECALL_SPOOL") or STATE_DIR / "spool.jsonl")
 ROTATE_BYTES = 1 << 20
 
 REQUIRED = ("event_id", "source", "occurred_at")
+LATEST_MS = 4_102_444_800_000   # 2100-01-01; a time past it is a broken record, not an event
 FIELDS = ("event_id", "source", "kind", "actor", "occurred_at", "body", "meta")
 
 
@@ -46,11 +47,14 @@ def _write_offset(spool: Path, offset: int) -> None:
 
 
 def to_event(raw: dict) -> dict | None:
-    """Validate one spooled line; None means skip it."""
+    """Validate one spooled line; None means skip it. Raises ValueError or TypeError for a
+    line that is not an event at all (both callers skip it and say so)."""
     if any(not raw.get(k) for k in REQUIRED):
         return None
     event = {k: raw.get(k) for k in FIELDS}
     event["occurred_at"] = int(event["occurred_at"])
+    if not 0 < event["occurred_at"] < LATEST_MS:
+        raise ValueError(f"occurred_at {event['occurred_at']} is not a time in milliseconds")
     if not isinstance(event["meta"], str):
         event["meta"] = json.dumps(event["meta"] or {})
     if event["body"] and is_one_time_code(event["body"]):

@@ -272,6 +272,8 @@ def run(settings: Settings, name: str, args: dict) -> tuple[str, bool]:
         return f"database error: {exc.details.get('errmsg') if exc.details else exc}", True
     except (KeyError, ValueError, TypeError, SystemExit) as exc:
         return f"bad input: {exc}", True
+    except Exception as exc:  # a page that will not load, the database or Voyage out of reach
+        return f"{name} failed: {type(exc).__name__}: {(str(exc).splitlines() or [''])[0][:200]}", True
 
 
 def describe_call(name: str, args: dict) -> str:

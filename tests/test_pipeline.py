@@ -73,3 +73,24 @@ def test_digest_keeps_a_long_hour_within_bounds():
     event = sink.digest_event(row)
     assert event["body"].startswith("1 event from 00:00 to 01:00 UTC\n")
     assert len(event["body"]) < sink.DIGEST_CHARS + 100
+
+
+def test_spool_refuses_a_time_that_is_not_milliseconds():
+    import pytest
+    from recall.stream import spool
+
+    good = {"event_id": "a", "source": "hermes", "occurred_at": 1_700_000_000_000}
+    assert spool.to_event(good)["occurred_at"] == 1_700_000_000_000
+    for bad in (10**20, -5):
+        with pytest.raises(ValueError):
+            spool.to_event({**good, "occurred_at": bad})
+
+
+def test_one_event_that_cannot_be_stored_does_not_stop_the_batch(capsys):
+    from recall.stream import sink
+
+    good = {"event_id": "a", "source": "hermes", "occurred_at": 1_700_000_000_000, "body": "Me: hi", "meta": "{}"}
+    docs = sink.docs_of([{**good, "event_id": "broken", "occurred_at": 10**20}, good, {"event_id": "no-source"}])
+    assert [d["source"] for d in docs] == ["event:hermes:a"]
+    err = capsys.readouterr().err
+    assert "'broken'" in err and "'no-source'" in err

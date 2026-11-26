@@ -95,6 +95,9 @@ def ensure_indexes(settings: Settings) -> str:
     coll.create_index([("source", 1), ("chunk_index", 1)], unique=True)
     coll.create_index("event.content_key", sparse=True)  # the stream sink's repeat check
     coll.create_index("created_at")                      # a time window listed without a subject
+    # Lists and counts by kind (memories, events, session notes), newest first. Without it each
+    # of those reads every chunk, embedding included.
+    coll.create_index([("tags", 1), ("created_at", -1)])
 
     existing = {idx["name"]: idx.get("latestDefinition") for idx in coll.list_search_indexes()}
     status = []

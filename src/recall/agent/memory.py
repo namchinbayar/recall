@@ -15,12 +15,16 @@ def remember(
     settings: Settings, fact: str, tags: list[str] | None = None, *,
     vector: list[float] | None = None, created_at: datetime | None = None, extra: dict | None = None,
 ) -> str:
-    """Store one fact as a single chunk. Returns the source id.
+    """Store one fact as a single chunk. Returns the source id. A fact that looks like it
+    holds a secret is refused (ValueError), as sync refuses such a file.
     `vector` saves a second embedding when the caller already has one; `created_at` is
     when the fact was said, for facts learned later; `extra` adds fields to the chunk."""
+    from .. import sync
+
     fact = fact.strip()
     if not fact:
         raise ValueError("empty fact")
+    sync.refuse_secret(fact)
     source = f"memory:{uuid.uuid4().hex[:12]}"
     if vector is None:
         vector = embed.embed_documents(settings, [fact])[0]

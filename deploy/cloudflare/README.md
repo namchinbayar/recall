@@ -14,7 +14,9 @@ For the recall app the Worker also does the sign-in (`src/session.js`):
   and stores the tokens in the Durable Object's storage. The browser gets a random
   session id in an HttpOnly cookie, never a token.
 - `/api/*` requests with that cookie are forwarded with the session's access token,
-  refreshed when it is about to expire. Requests that change something must carry the
+  refreshed when it is about to expire. A refused refresh ends the session; when the
+  sign-in service only fails to answer (5xx, 429) the session is kept and the request
+  gets a 503 to try again. Requests that change something must carry the
   `X-Recall-App` header and come from this site. A request with its own
   `Authorization` header is forwarded as it is.
 - `POST /auth/logout` ends the session and revokes its refresh token.
@@ -38,7 +40,7 @@ node preview.mjs     # the app on http://127.0.0.1:8793 with sample data and no 
 node preview.mjs --api http://127.0.0.1:8791 --token <token>   # against a real recall server
 ```
 
-`node --test deploy/cloudflare/test/` runs the sign-in tests and checks that the app's
+`node --test deploy/cloudflare/test/*.js` runs the sign-in tests and checks that the app's
 files, the offline list and the Worker's paths agree.
 
 Settings are Worker secrets, none are in this repository:
