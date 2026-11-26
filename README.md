@@ -143,8 +143,10 @@ recall sessions --since 30d            # then do it
 recall search "why did we change the reranker" --tag session-note
 ```
 
-- It reads `~/.claude/projects` and `~/.claude2/projects` (`RECALL_SESSION_ROOTS`,
-  colon-separated, to change that). Sub-agent transcripts are left out.
+- It reads the `projects` folder of `~/.claude` and of every other folder in the home
+  directory whose name starts with `.claude` (a second account, a second desktop app), so
+  a new one is picked up without a setting. `RECALL_SESSION_ROOTS`, colon-separated, names
+  the folders instead. Sub-agent transcripts are left out.
 - Only what was said goes to the model: your messages, the assistant's replies,
   and one line per command run or file edited. Tool output, images and
   reasoning are left out, and a message over 6,000 characters keeps its start

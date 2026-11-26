@@ -39,7 +39,6 @@ from .config import Settings, personal
 from .stream import spool
 
 STATE = spool.STATE_DIR / "sessions.json"
-DEFAULT_ROOTS = (Path.home() / ".claude" / "projects", Path.home() / ".claude2" / "projects")
 IDLE_MINUTES = 30
 MAX_CHARS = 120_000        # dialogue per model call; longer sessions go in several calls
 MAX_MESSAGE = 6_000        # one message; longer ones keep their start and end
@@ -130,9 +129,17 @@ class Note:
 
 # ----- reading transcripts -------------------------------------------------
 
+def default_roots(home: Path | None = None) -> list[Path]:
+    """Every Claude Code folder in the home directory that holds transcripts: ~/.claude and any
+    folder whose name starts the same way (a second account, a second desktop app). A fixed list
+    went stale without a sign: sessions run from a folder it did not name got no note. A folder
+    that is a link to another one is counted once."""
+    return sorted({p.resolve() for p in (home or Path.home()).glob(".claude*/projects") if p.is_dir()})
+
+
 def roots() -> list[Path]:
     env = os.environ.get("RECALL_SESSION_ROOTS")
-    return [Path(p).expanduser() for p in env.split(":") if p] if env else list(DEFAULT_ROOTS)
+    return [Path(p).expanduser() for p in env.split(":") if p] if env else default_roots()
 
 
 def skipped(path: Path | None = None) -> set[str]:
