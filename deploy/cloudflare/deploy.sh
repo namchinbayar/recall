@@ -5,8 +5,8 @@
 # different digest than the local one wrangler asks Cloudflare for. So this pushes the image
 # itself and points the deploy at the digest the registry reports.
 #
-# Only a clean checkout of master is deployed, so what runs at recall.example.com is always a
-# commit on master: one branch's deploy can no longer replace another's work. RELEASE is set
+# Only a clean checkout of main is deployed, so what runs at recall.example.com is always a
+# commit on main: one branch's deploy can no longer replace another's work. RELEASE is set
 # to that commit, so the container restarts with the new image whenever the commit changes.
 # RECALL_DEPLOY_ANY_BRANCH=1 skips the branch check (not the clean-tree one) in an emergency.
 #
@@ -15,8 +15,8 @@ set -eu
 cd "$(dirname "$0")"
 
 branch=$(git rev-parse --abbrev-ref HEAD)
-if [ "$branch" != master ] && [ "${RECALL_DEPLOY_ANY_BRANCH:-}" != 1 ]; then
-  echo "deploy from master, not $branch: merge first (RECALL_DEPLOY_ANY_BRANCH=1 overrides)" >&2; exit 1
+if [ "$branch" != main ] && [ "${RECALL_DEPLOY_ANY_BRANCH:-}" != 1 ]; then
+  echo "deploy from main, not $branch: merge first (RECALL_DEPLOY_ANY_BRANCH=1 overrides)" >&2; exit 1
 fi
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "uncommitted changes; commit them first so the deploy is a known commit" >&2; exit 1
