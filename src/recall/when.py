@@ -1,4 +1,4 @@
-"""Time words in a search query: "yesterday", "last week", "in October", "since 2026-11-20".
+"""Time words in a search query: "yesterday", "last week", "3 days ago", "in October", "since 2026-11-20".
 
 `what did I work on yesterday` is a question about a day, not about the words
 "work" and "yesterday". `parse` finds one such phrase, turns it into a window
@@ -23,20 +23,21 @@ MONTHS = {m: i for i, m in enumerate(
 MONTHS.update({m[:3]: i for m, i in list(MONTHS.items())})
 MONTHS["sept"] = 9
 DAYS = {d: i for i, d in enumerate(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"])}
-UNITS = {"day": 1, "days": 1, "week": 7, "weeks": 7, "month": 30, "months": 30}
-NUMBERS = {"a": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-           "ten": 10, "few": 3, "couple": 2, "couple of": 2}
+UNITS = {"day": 1, "days": 1, "week": 7, "weeks": 7, "month": 30, "months": 30, "year": 365, "years": 365}
+NUMBERS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+           "eight": 8, "nine": 9, "ten": 10, "few": 3, "couple": 2, "couple of": 2}
 
 _MONTH = "|".join(sorted(MONTHS, key=len, reverse=True))
 _DAY = "|".join(DAYS)
-_NUM = r"\d{1,3}|a|one|two|three|four|five|six|seven|ten|few|couple(?: of)?"
+_NUM = r"\d{1,3}|an?|one|two|three|four|five|six|seven|eight|nine|ten|few|couple(?: of)?"
+_UNIT = r"days?|weeks?|months?|years?"
 _ISO = r"\d{4}-\d{2}-\d{2}"
 
 # Words that carry no topic once the time phrase is gone: "what did I do yesterday".
 FILLER = set("""a an the i me my we our you he him his it its what which who when where how did do does done
 doing was were is are be been have has had on in at of for to from about during with and or any anything
 something stuff things thing happen happened happening going went work worked working up get got lately
-recent recently tell show find list all there that this those these just so far""".split())
+recent recently tell show find list all there that this those these just so far earlier""".split())
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,10 @@ def _month(year: int, month: int, tz: tzinfo) -> tuple[datetime, datetime]:
     return _midnight(date(year, month, 1), tz), _midnight(nxt, tz)
 
 
+def _year(year: int, tz: tzinfo) -> tuple[datetime, datetime]:
+    return _midnight(date(year, 1, 1), tz), _midnight(date(year + 1, 1, 1), tz)
+
+
 def _count(word: str) -> int:
     return int(word) if word.isdigit() else NUMBERS[word]
 
@@ -107,23 +112,55 @@ def _rules(today: date, tz: tzinfo):
     def between(m: re.Match) -> tuple[datetime, datetime]:
         return _midnight(date.fromisoformat(m["a"]), tz), _midnight(date.fromisoformat(m["b"]) + timedelta(days=1), tz)
 
+    def ago(m: re.Match) -> tuple[datetime, datetime]:
+        """'3 days ago' is that day; 'two weeks ago', 'a month ago' and 'a year ago' are the
+        calendar week, month or year that far back, since nobody means one day by them."""
+        n, unit = _count(m["n"].lower()), m["unit"].lower().rstrip("s")
+        if unit == "day":
+            return _span(today - timedelta(days=n), 1, tz)
+        if unit == "week":
+            return _span(monday - timedelta(days=7 * n), 7, tz)
+        if unit == "year":
+            return _year(today.year - n, tz)
+        months = today.year * 12 + today.month - 1 - n
+        return _month(months // 12, months % 12 + 1, tz)
+
+    def rolling(m: re.Match) -> tuple[datetime, datetime]:
+        days = UNITS[m["unit"].lower()]
+        return _midnight(today - timedelta(days=days - 1), tz), _midnight(today + timedelta(days=1), tz)
+
+    def weekend(m: re.Match) -> tuple[datetime, datetime]:
+        saturday = today - timedelta(days=(today.weekday() - 5) % 7)    # today, on a Saturday
+        if (m["which"] or "").lower() == "last" and today.weekday() >= 5:   # said during a weekend: the one before
+            saturday -= timedelta(days=7)
+        return _span(saturday, 2, tz)
+
     last_month = (today.replace(day=1) - timedelta(days=1))
     return [
         (rf"\b(?:between|from)\s+(?P<a>{_ISO})\s+(?:and|to|until)\s+(?P<b>{_ISO})\b", between),
         (rf"\bsince\s+(?P<d>{_ISO})\b", since),
         (rf"\b(?:on\s+)?(?P<d>{_ISO})\b", iso_day),
+        # Before "yesterday", which it contains.
+        (r"\b(?:the\s+)?day before yesterday\b", lambda m: _span(today - timedelta(days=2), 1, tz)),
         (r"\btoday\b|\bthis morning\b|\bthis afternoon\b|\btonight\b", lambda m: _span(today, 1, tz)),
         (r"\byesterday\b|\blast night\b", lambda m: _span(today - timedelta(days=1), 1, tz)),
-        (r"\bthe day before yesterday\b", lambda m: _span(today - timedelta(days=2), 1, tz)),
-        (rf"\b(?:in\s+)?the\s+(?:last|past)\s+(?P<n>{_NUM})\s+(?P<unit>days?|weeks?|months?)\b", last_n),
-        (rf"\b(?:last|past)\s+(?P<n>{_NUM})\s+(?P<unit>days?|weeks?|months?)\b", last_n),
-        (r"\bthis week\b", lambda m: _span(monday, 7, tz)),
-        (r"\blast week\b", lambda m: _span(monday - timedelta(days=7), 7, tz)),
-        (r"\bthis month\b", lambda m: _month(today.year, today.month, tz)),
-        (r"\blast month\b", lambda m: _month(last_month.year, last_month.month, tz)),
-        (rf"\b(?:on\s+|last\s+)(?P<day>{_DAY})\b", weekday),
+        (rf"\b(?P<n>{_NUM})\s+(?P<unit>{_UNIT})\s+ago\b", ago),
+        (rf"\b(?:in\s+)?the\s+(?:last|past)\s+(?P<n>{_NUM})\s+(?P<unit>{_UNIT})\b", last_n),
+        (rf"\b(?:last|past)\s+(?P<n>{_NUM})\s+(?P<unit>{_UNIT})\b", last_n),
+        # "the past week" counts back from today; "last week" below is the calendar week.
+        (r"\b(?:(?:in|over|during)\s+)?(?:the\s+)?past\s+(?P<unit>week|month|year)\b", rolling),
+        (r"\bthis week(?:'s)?(?!\w)", lambda m: _span(monday, 7, tz)),
+        (r"\blast week(?:'s)?(?!\w)", lambda m: _span(monday - timedelta(days=7), 7, tz)),
+        (r"\bthis month(?:'s)?(?!\w)", lambda m: _month(today.year, today.month, tz)),
+        (r"\blast month(?:'s)?(?!\w)", lambda m: _month(last_month.year, last_month.month, tz)),
+        (r"\bthis year(?:'s)?(?!\w)", lambda m: _year(today.year, tz)),
+        (r"\blast year(?:'s)?(?!\w)", lambda m: _year(today.year - 1, tz)),
+        # "the weekend" alone is left to the query: it is as often a subject as a time.
+        (r"\b(?:over|on|during)\s+the\s+weekend\b|\b(?P<which>this|last)\s+weekend\b", weekend),
+        (rf"\b(?:on\s+|last\s+|this\s+)(?P<day>{_DAY})\b", weekday),
         (rf"\b(?:in|during)\s+(?P<month>{_MONTH})(?:\s+(?P<year>\d{{4}}))?\b", month_named),
         (rf"\b(?P<month>{_MONTH})\s+(?P<year>\d{{4}})\b", month_named),
+        (r"\b(?:in|during)\s+(?P<y>(?:19|20)\d{2})\b", lambda m: _year(int(m["y"]), tz)),
     ]
 
 

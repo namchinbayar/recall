@@ -123,6 +123,17 @@ def check_indexes(settings: Settings) -> Check:
     return Check("search indexes", True, "both ready")
 
 
+def check_plain_indexes(settings: Settings) -> Check:
+    """A missing one breaks nothing, it makes lists and counts slow: shown, never alerted."""
+    try:
+        missing = db.missing_plain_indexes(db.chunks(settings))
+    except Exception as exc:
+        return Check("plain indexes", False, f"cannot list them ({type(exc).__name__})", warn=True)
+    if missing:
+        return Check("plain indexes", False, f"missing: {', '.join(missing)} (`recall init` creates them)", warn=True)
+    return Check("plain indexes", True, f"all {len(db.PLAIN_INDEXES)} present")
+
+
 def check_embeddings(settings: Settings) -> Check:
     try:
         vector = embed.embed_query(settings, "recall doctor")
@@ -224,7 +235,8 @@ def run(settings: Settings, restarts: dict | None = None, now: datetime | None =
     atlas = check_atlas(settings)
     checks.append(atlas)
     if atlas.ok:  # the rest of the database checks would only repeat the same failure
-        checks += [check_indexes(settings), check_metrics(settings, now), check_events(settings, now)]
+        checks += [check_indexes(settings), check_plain_indexes(settings),
+                   check_metrics(settings, now), check_events(settings, now)]
     checks += [check_embeddings(settings), check_spool(now), check_vault_key()]
     checks += [c for c in (check_assistant(), check_online()) if c]
     return checks, counts

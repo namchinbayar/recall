@@ -83,6 +83,29 @@ def _covers(current: dict | None, wanted: dict) -> bool:
     return all(have.get(k, {}).get("type") == v["type"] for k, v in wanted["mappings"]["fields"].items())
 
 
+# The plain indexes on chunks, as (keys, options). `recall init` creates them and `recall doctor`
+# checks that they are there.
+PLAIN_INDEXES: tuple[tuple[list[tuple[str, int]], dict], ...] = (
+    ([("source", 1)], {}),
+    ([("source", 1), ("chunk_index", 1)], {"unique": True}),
+    ([("event.content_key", 1)], {"sparse": True}),     # the stream sink's repeat check
+    ([("created_at", 1)], {}),                          # a time window listed without a subject
+    # Lists and counts by kind (memories, events, session notes), newest first. Without it each
+    # of those reads every chunk, embedding included.
+    ([("tags", 1), ("created_at", -1)], {}),
+)
+
+
+def plain_index_name(keys: list[tuple[str, int]]) -> str:
+    """The name MongoDB gives an index made without one: source_1_chunk_index_1."""
+    return "_".join(f"{field}_{direction}" for field, direction in keys)
+
+
+def missing_plain_indexes(coll: Collection) -> list[str]:
+    have = set(coll.index_information())
+    return [name for keys, _ in PLAIN_INDEXES if (name := plain_index_name(keys)) not in have]
+
+
 def ensure_indexes(settings: Settings) -> str:
     """Create the search indexes and plain indexes, and bring older search indexes up to date.
 
@@ -91,16 +114,15 @@ def ensure_indexes(settings: Settings) -> str:
     updated one keeps answering with its old definition until the rebuild is done.
     """
     coll = chunks(settings)
-    coll.create_index("source")
-    coll.create_index([("source", 1), ("chunk_index", 1)], unique=True)
-    coll.create_index("event.content_key", sparse=True)  # the stream sink's repeat check
-    coll.create_index("created_at")                      # a time window listed without a subject
-    # Lists and counts by kind (memories, events, session notes), newest first. Without it each
-    # of those reads every chunk, embedding included.
-    coll.create_index([("tags", 1), ("created_at", -1)])
+    new = missing_plain_indexes(coll)
+    for keys, options in PLAIN_INDEXES:
+        coll.create_index(keys, **options)
+    status = [f"created plain index '{name}'" for name in new]
+    kept = len(PLAIN_INDEXES) - len(new)
+    if kept:
+        status.append(f"{kept} {'other ' if new else ''}plain index{'es are' if kept != 1 else ' is'} current")
 
     existing = {idx["name"]: idx.get("latestDefinition") for idx in coll.list_search_indexes()}
-    status = []
     for name, kind, definition in (
         (settings.text_index_name, "search", TEXT_INDEX),
         (settings.index_name, "vectorSearch", vector_index(settings)),

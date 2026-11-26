@@ -100,7 +100,7 @@ def search(
     excerpt around the matching words, with its date; search again with full=true and a
     small limit when you need a whole chunk. Turn on include_events for questions about
     what happened or was said recently. Time words in the query (yesterday, last week,
-    in October, since 2026-11-20) limit results to that window, and a query that is only
+    3 days ago, in October, since 2026-11-20) limit results to that window, and a query that is only
     a time ("what did I do yesterday") lists that window newest first; since/until set
     the window exactly."""
     return _run("search_knowledge", {
