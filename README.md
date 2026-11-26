@@ -59,8 +59,9 @@ uv run recall rm file:/home/you/notes/niri.md
 ```
 
 Search returns the best chunk of each source, so one long note cannot fill
-the page. Time words in a query ("yesterday", "last week", "past 3 days", "in
-October", "since 2026-11-20", "on Monday") are read in `RECALL_TZ` (default:
+the page. Time words in a query ("yesterday", "last week", "3 days ago", "past 3
+days", "over the weekend", "in October", "last year", "since 2026-11-20", "on
+Monday") are read in `RECALL_TZ` (default:
 the machine's zone) and filter both retrievers by `created_at`; the rest of
 the query is ranked as usual. The search indexes need `created_at` as a
 field; `recall init` adds it to older ones (they keep answering while they
@@ -174,7 +175,7 @@ systemctl --user enable --now recall-sessions.service
 
 `recall doctor` checks every part and prints one line each: the services are
 running and not restarting in a loop, Atlas answers, both search indexes are
-ready, metrics are arriving, Voyage answers, no Hermes events are stuck in the
+ready, the plain indexes exist (a warning when one is missing), metrics are arriving, Voyage answers, no Hermes events are stuck in the
 spool, the vault key is present and private, and the Claude API key works.
 With `RECALL_ONLINE_HEALTHZ=https://name.example/healthz` set, it also checks
 that the hosted recall (see "Online") is up and can reach its database.
