@@ -281,6 +281,13 @@ expect = []                                        # nothing stored answers it: 
   search cannot find what is not there.
 - With a baseline saved (`~/.local/state/recall/eval.json`), every later run ends with what
   moved: which questions got better and which got worse.
+- A source that quotes the questions themselves (the note of a session spent on the
+  question set, a README that uses one as its example) matches them word for word. Put
+  `ignore = ["session:0b1f6c1e-*"]` above the cases and such sources are left out of
+  every result before it is judged.
+- A case can carry `group = "sessions"` (any label of your own). The report then counts
+  each group apart, which shows where search is weak: plain notes, a decision inside a
+  session note, a fact deep in a long note, a time in the question, exact words.
 - Each question costs one embedding call and one rerank call. Nothing is written to the
   database.
 

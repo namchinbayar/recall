@@ -141,3 +141,57 @@ def test_report_lists_what_went_wrong_and_how_the_baseline_moved(tmp_path):
         assert part in text, part
     assert "(the baseline counted the top 5)" not in text
     assert "(the baseline counted the top 5)" in "\n".join(evals.report(after, 8, baseline))
+
+
+def test_ignored_sources_are_left_out_before_a_result_is_judged(tmp_path):
+    path = write(tmp_path, '''
+        ignore = ["session:about-the-eval-*", "file:~/notes/eval.md"]
+
+        [[case]]
+        q = "x"
+        expect = "a"
+    ''')
+    ignore = evals.load_ignore(path)
+    assert ignore == ("session:about-the-eval-*", f"file:{Path.home()}/notes/eval.md")
+    assert evals.load_ignore(tmp_path / "none.toml") == () and len(evals.load(path)) == 1
+
+    results = [hit("session:about-the-eval-1"), hit("x"), hit("a"), hit("y")]
+    plain = evals.run([Case("q", ("a",))], lambda c: results)[0]
+    assert plain.rank == 3
+    out = evals.run([Case("q", ("a",))], lambda c: results, ignore=ignore, limit=2)[0]
+    assert out.rank == 2 and [h.source for h in out.hits] == ["x", "a"]          # dropped first, then cut to the limit
+    assert evals.run([Case("q", ("y",))], lambda c: results, ignore=ignore, limit=2)[0].kind == "missed"
+
+
+def test_groups_are_counted_apart_in_the_order_they_appear(tmp_path):
+    cases = evals.load(write(tmp_path, '''
+        [[case]]
+        q = "one"
+        expect = "a"
+        group = "notes"
+
+        [[case]]
+        q = "two"
+        expect = "b"
+        group = " sessions "
+
+        [[case]]
+        q = "three"
+        expect = "c"
+        group = "notes"
+
+        [[case]]
+        q = "small talk"
+        expect = []
+        group = "quiet"
+    '''))
+    assert [c.group for c in cases] == ["notes", "sessions", "notes", "quiet"]
+    results = {"one": [hit("a")], "two": [hit("x"), hit("b")], "three": [hit("x")], "small talk": [hit("x", 0.2)]}
+    out = evals.run(cases, lambda c: results[c.q])
+    groups = evals.by_group(out)
+    assert [name for name, _ in groups] == ["notes", "sessions", "quiet"]
+    assert (groups[0][1].asked, groups[0][1].first, groups[0][1].found) == (2, 1, 1) and groups[1][1].found == 1
+    text = "\n".join(evals.report(out, 5))
+    for part in ("by group    first  top 5   of", "  notes         1        1  2", "  sessions      0        1  1", "  quiet     quiet 1 of 1"):
+        assert part in text, (part, text)
+    assert evals.by_group(evals.run([Case("q", ("a",))], lambda c: [hit("a")])) == []          # no groups named: no table
