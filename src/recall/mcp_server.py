@@ -29,7 +29,9 @@ INSTRUCTIONS = """recall is the user's personal knowledge base: saved articles, 
 durable memories, recent events (desktop notifications and Hermes conversations), and \
 machine metrics, shared by all their assistants. When you do not already know them, call \
 profile once at the start; call catch_up to see what they and their other assistants worked \
-on lately and what was left open. Search it before answering questions about their setup, \
+on lately and what was left open. When they say they did something that is on that list, or \
+that it no longer matters, call open_items for its id and take it off with close_open_item. \
+Search it before answering questions about their setup, \
 projects, past decisions, or anything they saved; time words in a query ("yesterday", \
 "last week") limit it to that window. When they state a lasting fact or preference, call \
 remember. Save useful pages or notes they ask to keep with save_url_or_file or save_note. \
@@ -133,6 +135,52 @@ def catch_up(
     from . import serve
 
     return serve.catch_up(_settings(), days, with_profile=with_profile)
+
+
+@tool(READ_SCOPE, title="Open items", annotations=READ)
+def open_items(days: Annotated[int, Field(ge=1, le=90, description="How far back to look.")] = 14) -> str:
+    """What their sessions left open and nothing has closed since: each session with its items
+    and their ids. Items a later session settled are already gone; many of the rest are steps
+    only they can take. Use it when they ask what is left to do, or to find the id of an item
+    they say is done."""
+    from . import serve
+
+    out = serve.open_items(_settings(), {"days": days, "limit": serve.OPEN_LIMIT[1]})
+    if not out["notes"]:
+        return f"nothing is open from the last {out['days']} days"
+    lines = [f"{sum(len(n['items']) for n in out['notes'])} open item(s) from {len(out['notes'])} session(s) in the last {out['days']} days"]
+    for n in out["notes"]:
+        lines.append(f"\n{(n['date'] or '')[:10]}  {n['title']}  ({n['folder'] or n['kind']}; {n['source']})")
+        lines.extend(f"- {text}  [{item_id}]" for item_id, text in zip(n["ids"], n["items"]))
+    return "\n".join(lines)
+
+
+@tool(WRITE_SCOPE, title="Close an open item", annotations=ADD)
+def close_open_item(
+    item: Annotated[str, Field(description="The item's id from open_items or catch_up, open:xxxxxxxxxxxx.")],
+    how: Annotated[Literal["done", "dropped"], Field(description="done: it was done. dropped: decided against, or it no longer applies.")] = "done",
+    why: Annotated[str | None, Field(description="One sentence on what they said or did, in their words where possible.")] = None,
+) -> str:
+    """Take one item off the open list because they say it is done, decided against, or no
+    longer applies. Close only what they told you; do not guess that something was done. The
+    session note it came from is not changed, and reopen_open_item puts it back."""
+    from . import openitems
+
+    try:
+        found = openitems.close_by_hand(_settings(), item, how, why or "", by="assistant")
+    except (LookupError, ValueError) as exc:
+        raise ToolError(str(exc)) from None
+    return f"closed ({how}): {found.text}"
+
+
+@tool(WRITE_SCOPE, title="Reopen an item", annotations=ADD)
+def reopen_open_item(item: Annotated[str, Field(description="The id of a closed item, open:xxxxxxxxxxxx.")]) -> str:
+    """Put an item back on the open list after it was closed by mistake."""
+    from . import openitems
+
+    if not openitems.ITEM_ID.match(item):
+        raise ToolError("an open item's id looks like open:0123456789ab")
+    return f"{item} is open again" if openitems.Store(_settings()).reopen(item) else f"{item} was not closed"
 
 
 @tool(WRITE_SCOPE, title="Remember a fact", annotations=ADD)

@@ -222,3 +222,25 @@ def test_a_dry_run_and_a_failed_call_write_nothing():
     fresh = FakeStore()
     assert openitems.settle_pending(None, fresh, lambda *a: answer(), since, limit=1, **kw)["asked"] == 0      # only session:a
     assert set(fresh.marks) == {"session:a"}
+
+
+def test_closing_by_hand_needs_a_real_item_and_records_where_it_was_said():
+    data = rows("session:a", 4, note(still=("Push it.", "Sign in on the phone.")))
+    push = openitems.item_id("session:a", "Push it.")
+    store = FakeStore()
+    kw = dict(store=store, now=NOW, load=lambda s, d: data)
+    assert openitems.find(None, push, NOW, kw["load"]).text == "Push it."
+    assert openitems.find(None, "open:ffffffffffff", NOW, kw["load"]) is None
+
+    item = openitems.close_by_hand(None, push, "done", "  Pushed it   this morning. ", "assistant", **kw)
+    assert item.text == "Push it." and store.closures[push] == {"text": "Push it.", "how": "done", "why": "Pushed it this morning.", "by": "assistant"}
+    sign = openitems.item_id("session:a", "Sign in on the phone.")
+    openitems.close_by_hand(None, sign, "dropped", "", "app", **kw)
+    assert store.closures[sign]["why"] == "" and store.closures[sign]["how"] == "dropped"
+
+    with pytest.raises(LookupError):
+        openitems.close_by_hand(None, "open:ffffffffffff", **kw)
+    for bad in (dict(item="memory:0123456789ab"), dict(item=push, how="carried"), dict(item=push, why="x" * 301),
+                dict(item=push, why="the token is ghp_" + "a1B2" * 9)):
+        with pytest.raises(ValueError):
+            openitems.close_by_hand(None, **bad, **kw)

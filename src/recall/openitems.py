@@ -16,6 +16,9 @@ This module keeps what was settled, apart from the notes (collection `open_items
   call then looks at each proposed closure alone and must agree. At most MAX_CLOSE per note; each
   closure keeps the reason, the quote and the note that closed it. Nothing is deleted:
   `recall open --reopen <id>` puts an item back.
+- The owner can close an item too, which is the only way for the many items that are a step
+  of their own ("sign in on the phone") or a caveat no session returns to: `recall open --done`,
+  the app's Open page, or any assistant through the MCP tool close_open_item.
 - An item is open while its note still lists it and no closure exists for it. A note rewritten
   when its session continues speaks for itself: what it no longer lists is gone, and a reworded
   item is a new item.
@@ -261,6 +264,49 @@ class Store:
 
 def closed_ids(settings: Settings, ids: list[str]) -> set[str]:
     return Store(settings).closed(ids)
+
+
+# ----- closing by hand -------------------------------------------------------------
+
+ITEM_ID = re.compile(r"^open:[0-9a-f]{12}$")
+HAND_DAYS = 90          # how far back an item can be closed by hand (the longest window open_items shows)
+HAND_HOWS = ("done", "dropped")
+MAX_WHY = 300
+
+
+def find(settings: Settings, item: str, now: datetime | None = None,
+         load: Callable[[Settings, datetime], list[dict]] | None = None) -> Item | None:
+    """The item with this id among the session notes of the last HAND_DAYS days, open or closed."""
+    from . import serve
+
+    since = (now or datetime.now(timezone.utc)) - timedelta(days=HAND_DAYS)
+    for s in read_notes((load or serve._note_chunks)(settings, since)):
+        for i in s.items:
+            if i.id == item:
+                return i
+    return None
+
+
+def close_by_hand(settings: Settings, item: str, how: str = "done", why: str = "", by: str = "hand",
+                  store=None, now: datetime | None = None,
+                  load: Callable[[Settings, datetime], list[dict]] | None = None) -> Item:
+    """Take one item off the list because its owner says so. `by` names where that was said
+    (hand: the command line, app, assistant). Raises LookupError when no note of the last
+    HAND_DAYS days lists the item, ValueError for a bad id, way or reason."""
+    if not ITEM_ID.match(item or ""):
+        raise ValueError("an open item's id looks like open:0123456789ab")
+    if how not in HAND_HOWS:
+        raise ValueError(f"how is one of: {', '.join(HAND_HOWS)}")
+    why = " ".join((why or "").split())
+    if len(why) > MAX_WHY:
+        raise ValueError(f"the reason is longer than {MAX_WHY} characters")
+    sync.refuse_secret(why)
+    now = now or datetime.now(timezone.utc)
+    found = find(settings, item, now, load)
+    if found is None:
+        raise LookupError(f"no session note of the last {HAND_DAYS} days lists {item}")
+    (store or Store(settings)).close(found, how, why, by, now)
+    return found
 
 
 # ----- settling ------------------------------------------------------------------

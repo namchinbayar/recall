@@ -14,6 +14,7 @@ ME = "U-me"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 WHEN = datetime(2026, 11, 18, 9, 30, tzinfo=timezone.utc)
 MEMORY = "memory:0123456789ab"
+OPEN = "open:0123456789ab"
 
 
 def token(**changes):
@@ -61,6 +62,10 @@ def calls(monkeypatch):
     fake("do_event_counts", {"since": "24h", "total": 0, "kinds": {}})
     fake("do_profile", {"text": "", "written": None})
     fake("do_status", {"memories": 3})
+    fake("do_open", lambda days: {"days": days, "total": 0, "notes": []})
+    fake("do_open_done", lambda item, how, why: {"closed": {"id": item, "text": "x"}})
+    fake("do_open_reopen", {"reopened": True})
+    fake("do_open_closed", {"closed": []})
     return seen
 
 
@@ -70,6 +75,8 @@ EVERY_ROUTE = [
     ("GET", "/api/v1/retired"), ("POST", f"/api/v1/retired/{MEMORY}/restore"), ("POST", "/api/v1/notes"),
     ("GET", "/api/v1/sources"), ("GET", "/api/v1/source?id=note:abc"), ("GET", "/api/v1/events"),
     ("GET", "/api/v1/events/counts"), ("GET", "/api/v1/profile"),
+    ("GET", "/api/v1/open"), ("GET", "/api/v1/open/closed"), ("POST", f"/api/v1/open/{OPEN}/done"),
+    ("POST", f"/api/v1/open/{OPEN}/reopen"),
 ]
 
 
@@ -115,6 +122,9 @@ def test_a_wrong_scheme_or_an_empty_token_is_refused(http, calls):
     ("POST", "/api/v1/notes", "recall:read"),
     ("POST", f"/api/v1/retired/{MEMORY}/restore", "recall:read"),
     ("DELETE", f"/api/v1/memories/{MEMORY}", "recall:read recall:write"),  # deleting needs recall:forget
+    ("GET", "/api/v1/open", "recall:write"),
+    ("POST", f"/api/v1/open/{OPEN}/done", "recall:read"),                 # closing an item is a write
+    ("POST", f"/api/v1/open/{OPEN}/reopen", "recall:read"),
 ])
 def test_each_route_needs_its_own_permission(http, calls, method, path, scope):
     resp = http.request(method, path, headers=bearer(scope=scope), json={"fact": "x", "text": "x"} if method == "POST" else None)
@@ -262,3 +272,46 @@ def test_reading_one_source_never_asks_for_vault_chunks(monkeypatch):
     with pytest.raises(api.Refused) as exc:
         api.do_source("vault:bank")
     assert exc.value.status == 404
+
+
+def test_open_items_are_listed_closed_and_reopened_by_id(http, calls):
+    assert http.get("/api/v1/open", headers=bearer()).json() == {"days": 14, "total": 0, "notes": []}
+    assert http.get("/api/v1/open", params={"days": "999"}, headers=bearer()).json()["days"] == 90
+    assert http.get("/api/v1/open/closed", params={"limit": "5"}, headers=bearer()).json() == {"closed": []}
+
+    assert http.post(f"/api/v1/open/{OPEN}/done", headers=bearer()).json() == {"closed": {"id": OPEN, "text": "x"}}      # no body: done
+    body = {"how": "dropped", "why": " not needed any more "}
+    assert http.post(f"/api/v1/open/{OPEN}/done", headers=bearer(), json=body).status_code == 200
+    assert http.post(f"/api/v1/open/{OPEN}/reopen", headers=bearer()).json() == {"reopened": True}
+    assert calls == [("do_open", 14), ("do_open", 90), ("do_open_closed", 5), ("do_open_done", OPEN, "done", ""),
+                     ("do_open_done", OPEN, "dropped", "not needed any more"), ("do_open_reopen", OPEN)]
+
+    for path, kwargs in ((f"/api/v1/open/{MEMORY}/done", {}), ("/api/v1/open/open:XYZ/reopen", {}),
+                         (f"/api/v1/open/{OPEN}/done", {"json": {"how": "finished"}}),
+                         (f"/api/v1/open/{OPEN}/done", {"json": {"why": "x" * 301}})):
+        assert http.post(path, headers=bearer(), **kwargs).status_code in (400, 413), path
+    assert len(calls) == 6
+
+
+def test_closing_an_item_no_note_lists_is_a_404(http, monkeypatch):
+    def gone(settings, item, how, why, by):
+        raise LookupError(f"no session note of the last 90 days lists {item}")
+
+    monkeypatch.setattr(api.mcp_server, "_settings", lambda: None)
+    monkeypatch.setattr(api.openitems, "close_by_hand", gone)
+    resp = http.post(f"/api/v1/open/{OPEN}/done", headers=bearer())
+    assert resp.status_code == 404 and OPEN in resp.json()["error"]
+
+
+def test_open_items_come_back_as_ids_with_their_text(monkeypatch):
+    from recall import serve
+
+    notes = [{"source": "session:a", "title": "Older work", "date": "2026-11-08T12:00:00+00:00", "folder": "~/x", "kind": "claude",
+              "items": ["Nothing is pushed.", "Sign in."], "ids": [OPEN, "open:ba9876543210"]}]
+    monkeypatch.setattr(api.mcp_server, "_settings", lambda: None)
+    monkeypatch.setattr(serve, "open_items", lambda settings, req: {"ok": True, "days": req["days"], "notes": notes})
+    out = api.do_open(30)
+    assert (out["days"], out["total"]) == (30, 2)
+    assert out["notes"][0] == {"source": "session:a", "title": "Older work", "at": "2026-11-08T12:00:00+00:00", "folder": "~/x",
+                               "kind": "claude", "items": [{"id": OPEN, "text": "Nothing is pushed."},
+                                                           {"id": "open:ba9876543210", "text": "Sign in."}]}

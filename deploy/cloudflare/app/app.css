@@ -105,7 +105,7 @@ main:focus { outline: none; }
 
 .tabs {
 	position: fixed; inset-inline: 0; inset-block-end: 0; z-index: 5;
-	display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+	display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
 	padding: 6px max(8px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
 	border-block-start: 1px solid var(--line);
 	background: var(--bg);
@@ -294,6 +294,19 @@ a.tile:hover { background: var(--surface-2); }
 }
 .check { display: inline-flex; align-items: center; gap: 10px; min-block-size: 44px; color: var(--muted); font-size: 14px; cursor: pointer; }
 .check input { inline-size: 18px; block-size: 18px; accent-color: var(--gold); }
+
+/* ----- open items --------------------------------------------------------------- */
+
+.open-note { display: flex; flex-direction: column; gap: 4px; padding-block: 16px 8px; border-block-start: 1px solid var(--line); }
+.open-note h2 { font-size: 16px; font-weight: 500; }
+.open-note h2 a { color: inherit; text-decoration: none; }
+.open-note h2 a:hover { color: var(--gold-strong); }
+.open-list { display: flex; flex-direction: column; margin: 4px 0 0; padding: 0; list-style: none; }
+.open-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding-block: 6px; }
+.open-row p { font-size: 15px; color: var(--text); overflow-wrap: anywhere; }
+.open-row.closed p { color: var(--muted); text-decoration: line-through; }
+.open-foot { margin-block-start: 18px; }
+.open-foot a { color: var(--blue); }
 
 /* ----- lists ------------------------------------------------------------------ */
 

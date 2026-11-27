@@ -63,9 +63,41 @@ const tally = (rows) => { const out = {}; for (const row of rows) out[row.kind] 
 const minutes = (since) => Number(since.slice(0, -1)) * { m: 1, h: 60, d: 1440 }[since.at(-1)];
 const within = (since) => events.filter((event) => Date.now() - Date.parse(`${event.at}Z`) <= minutes(since) * 60_000);
 
+const openNotes = [
+	{ source: "session:demo-1", title: "Phone sign-in and the new Home", at: ago(300), folder: "~/Projects/recall", kind: "claude", items: [
+		{ id: "open:0123456789ab", text: "Sign-in was not tested on the phone. Open the app once to confirm." },
+		{ id: "open:1123456789ab", text: "The `RELEASE` setting is not shown anywhere in the app." },
+		{ id: "open:2123456789ab", text: "Decide whether saved pages should keep their images." },
+	] },
+	{ source: "session:demo-2", title: "Chat about the weekend plans", at: ago(2000), folder: null, kind: "hermes", items: [
+		{ id: "open:3123456789ab", text: "Book the table for Saturday." },
+	] },
+];
+const closedItems = [
+	{ id: "open:9123456789ab", text: "Nothing is pushed to GitHub.", how: "done", why: "The session pushed the branch and opened a pull request.",
+		quote: "Pushed the branch.", by: "session:demo-1", at: ago(200), title: "Earlier work on the Home page" },
+];
+
 async function sample(method, url, body) {
 	const path = url.pathname.slice("/api/v1".length);
 	const q = url.searchParams;
+	if (method === "GET" && path === "/open") {
+		const notes = openNotes.map((n) => ({ ...n, items: n.items.filter((i) => !closedItems.some((c) => c.id === i.id)) })).filter((n) => n.items.length);
+		return [200, { days: Math.min(Number(q.get("days") ?? 14), 90), total: notes.reduce((sum, n) => sum + n.items.length, 0), notes }];
+	}
+	if (method === "GET" && path === "/open/closed") return [200, { closed: closedItems }];
+	if (method === "POST" && /^\/open\/[^/]+\/done$/.test(path)) {
+		const ident = decodeURIComponent(path.split("/")[2]);
+		const found = openNotes.flatMap((n) => n.items.map((i) => ({ ...i, title: n.title }))).find((i) => i.id === ident);
+		if (!found) return [404, { error: `no session note of the last 90 days lists ${ident}` }];
+		if (!closedItems.some((c) => c.id === ident)) closedItems.unshift({ id: ident, text: found.text, how: body?.how ?? "done", why: "", quote: "", by: "app", at: ago(0), title: found.title });
+		return [200, { closed: { id: ident, text: found.text } }];
+	}
+	if (method === "POST" && /^\/open\/[^/]+\/reopen$/.test(path)) {
+		const at = closedItems.findIndex((c) => c.id === decodeURIComponent(path.split("/")[2]));
+		if (at >= 0) closedItems.splice(at, 1);
+		return [200, { reopened: at >= 0 }];
+	}
 	if (method === "GET" && path === "/me") return [200, { user: "preview", scopes: ["recall:read", "recall:write", "recall:forget"] }];
 	if (method === "GET" && path === "/status") {
 		return [200, { memories: memories.length, learned: memories.filter((m) => m.kind === "learned").length, retired: retired.length,

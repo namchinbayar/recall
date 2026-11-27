@@ -629,6 +629,109 @@ async function item({ params, paint }) {
 	));
 }
 
+// ----- open items ------------------------------------------------------------
+// What sessions left open and nothing has closed. Done takes an item off the list on the
+// server; the row stays where it is with Undo until the page is left, and the Closed list
+// keeps every closure with Reopen, so nothing depends on a message that disappears.
+
+const CLOSED_BY = { hand: "by hand", app: "in the app", assistant: "through an assistant" };
+
+async function openItems({ params, paint }) {
+	const showing = params.get("show") === "closed" ? "closed" : "open";
+	const days = params.get("days") === "90" ? 90 : 14;
+	document.title = `${showing === "closed" ? "Closed" : "Open"} items · recall`;
+	const head = (total) => el("div", { class: "page-head" },
+		el("h1", {}, "Open items"),
+		chips(showing, [["open", "Open", total], ["closed", "Closed"]], (value) => (value === "open" ? "/open" : "/open?show=closed")));
+	paint(head(), wait(), wait());
+
+	if (showing === "closed") {
+		const load = async () => {
+			const [open, data] = await Promise.all([api("/open"), api("/open/closed?limit=60")]);
+			const rows = data.closed ?? [];
+			paint(head(open.total), rows.length
+				? el("div", { class: "list" }, rows.map((row) => closedRow(row, reload)))
+				: empty("Nothing has been closed yet. An item leaves the list when a later session settles it, or when you mark it done."));
+		};
+		const reload = () => load().catch((error) => { if (!(error instanceof SignedOut)) toast(error.message); });
+		return load();
+	}
+
+	const data = await api(`/open?days=${days}`);
+	let total = data.total ?? 0;
+	const changed = (by) => {
+		total += by;
+		const shown = main.querySelector('.chips a[aria-current="true"] .count');
+		if (shown) shown.textContent = count(total);
+	};
+	const other = days === 14
+		? el("a", { href: "/open?days=90" }, "Show the last 90 days")
+		: el("a", { href: "/open" }, "Show the last 14 days");
+	paint(head(total),
+		(data.notes ?? []).length
+			? el("div", { class: "open-notes" }, data.notes.map((note) => openNote(note, changed)))
+			: empty(`Nothing is open from the last ${data.days ?? days} days.`),
+		el("p", { class: "small muted open-foot" }, `From the sessions of the last ${data.days ?? days} days. `, other));
+}
+
+function openNote(note, changed) {
+	const where = note.folder ?? (note.kind === "hermes" ? "Hermes" : null);
+	return el("div", { class: "open-note" },
+		el("p", { class: "label kind-session" }, [day(note.at), where].filter(Boolean).join(" · ")),
+		el("h2", {}, el("a", { href: itemHref(note.source) }, note.title)),
+		el("ul", { class: "open-list", role: "list" }, note.items.map((item) => openRow(item, changed))));
+}
+
+function openRow(item, changed) {
+	const textId = `open-${item.id.replace(/[^0-9a-z]/g, "-")}`;
+	const button = el("button", { class: "button quiet", type: "button", "aria-describedby": textId }, "Done");
+	const row = el("li", { class: "open-row" }, el("p", { id: textId }, inline(item.text)), button);
+	button.addEventListener("click", async () => {
+		if (!busy(button, true)) return;
+		const closing = !row.classList.contains("closed");
+		try {
+			await api(`/open/${encodeURIComponent(item.id)}/${closing ? "done" : "reopen"}`, { method: "POST" });
+			row.classList.toggle("closed", closing);
+			button.textContent = closing ? "Undo" : "Done";
+			changed(closing ? -1 : 1);
+			toast(closing ? "Marked done" : "Back on the list");
+		} catch (error) {
+			if (!(error instanceof SignedOut)) toast(error.message);
+		} finally {
+			busy(button, false);
+		}
+	});
+	return row;
+}
+
+function closedRow(row, after) {
+	const how = { done: "Done", dropped: "Dropped", carried: "Carried forward" }[row.how] ?? "Closed";
+	const session = row.by?.startsWith("session:");
+	const textId = `closed-${row.id.replace(/[^0-9a-z]/g, "-")}`;
+	const reopen = async (event) => {
+		const button = event.currentTarget;
+		if (!busy(button, true)) return;
+		try {
+			await api(`/open/${encodeURIComponent(row.id)}/reopen`, { method: "POST" });
+			toast("Back on the list");
+			after();
+		} catch (error) {
+			busy(button, false);
+			if (!(error instanceof SignedOut)) toast(error.message);
+		}
+	};
+	return el("div", { class: "row" },
+		el("div", { class: "row-meta" },
+			el("span", { class: "label kind-session" }, [how, day(row.at)].filter(Boolean).join(" · "))),
+		el("p", { id: textId }, inline(row.text)),
+		row.why ? el("p", { class: "small muted" }, row.why) : null,
+		el("p", { class: "small muted" },
+			session ? ["Closed by a later session: ", el("a", { href: itemHref(row.by) }, "open its note")] : `Closed ${CLOSED_BY[row.by] ?? "by hand"}`,
+			row.title ? ` · from “${row.title}”` : null),
+		el("div", { class: "row-actions" },
+			el("button", { class: "button quiet", type: "button", "aria-describedby": textId, onclick: reopen }, "Reopen")));
+}
+
 // ----- profile ---------------------------------------------------------------
 
 async function profile({ paint }) {
@@ -654,9 +757,9 @@ async function profile({ paint }) {
 
 const VIEWS = {
 	"/": home, "/search": search, "/memories": memories, "/timeline": timeline,
-	"/sources": sources, "/item": item, "/profile": profile,
+	"/sources": sources, "/item": item, "/profile": profile, "/open": openItems,
 };
-const TABS = { "/": "home", "/search": "search", "/memories": "memories", "/timeline": "timeline" };
+const TABS = { "/": "home", "/search": "search", "/memories": "memories", "/timeline": "timeline", "/open": "open" };
 let turn = 0; // which page load is current; an older one must not paint
 let depth = 0; // pages opened inside the app, so Back knows whether there is one to go back to
 
