@@ -209,6 +209,13 @@ What the model may decide, and what code decides:
 - The notes are never changed, so a search still finds what was open on that day. Closures
   live apart in the `open_items` collection; `--reopen` deletes one and the item is back.
 
+Most of what stays on the list is a step only you can take ("sign in on the phone") or a
+caveat no session comes back to, and no later note will ever settle those. You close them
+where you are: `recall open --done <id>`, the Done button on the app's Open page, or by
+telling any assistant that has recall ("I did that"): it finds the item with the
+`open_items` tool and closes it with `close_open_item`. A closure made this way records
+where it was said (by hand, in the app, through an assistant).
+
 An item is open while its note still lists it and no closure exists for it. That only takes
 off what a later note shows was settled. On the first run over 14 days of notes (97 notes,
 294 items) it closed 31 items, 21 of them from that window; most of what stayed is a step
@@ -656,7 +663,8 @@ thinking blocks, is passed back unchanged.
 Copilot, Cursor and Hermes can search and save directly. Each client starts
 its own copy. Tools: `profile`, `catch_up`, `search`, `remember`, `forget`, `list_memories`,
 `list_sources`, `save_url_or_file`, `save_note`, `recent_events`,
-`metrics_summary`, `metrics_manual`, `record_metric`. They share their code
+`metrics_summary`, `metrics_manual`, `record_metric`, `open_items`, `close_open_item`,
+`reopen_open_item`. They share their code
 with the `recall chat` agent. The vault is not reachable: search excludes it
 and no tool touches it.
 
@@ -760,6 +768,10 @@ token, checked exactly as for MCP, and each route needs its permission.
 | `GET /events?since=24h&source=` | read | notifications, digests and Hermes chats, newest first |
 | `GET /events/counts?since=24h` | read | how many events arrived, by kind |
 | `GET /profile` | read | the standing profile |
+| `GET /open?days=` | read | what sessions left open and nothing has closed, by session, each item with its id |
+| `POST /open/{id}/done` `{how, why}` | write | takes one item off the list (`how`: done or dropped; both fields optional) |
+| `POST /open/{id}/reopen` | write | puts a closed item back |
+| `GET /open/closed` | read | the latest closures: how, why, and what closed each |
 
 Vault entries are never returned. The app's pages do not hold a token: the Cloudflare
 Worker signs the user in and adds the token to each request (see
@@ -771,7 +783,9 @@ A small web app for a phone or a desktop, served from the same address
 (`deploy/cloudflare/app`, plain HTML, CSS and JavaScript, no build step). Home has a
 save box and tiles for memories, sources, what was learned lately, the last day's
 events and what is waiting to be read; the other pages search, list memories (forget,
-restore), show the timeline, the sources and one saved item. It can be added to the
+restore), show the timeline, the sources and one saved item. The Open page lists what
+sessions left open, with a Done button on each item and the closed ones under Closed,
+where Reopen puts one back. It can be added to the
 home screen. `node deploy/cloudflare/preview.mjs` opens it on this machine with sample
 data and no sign-in.
 

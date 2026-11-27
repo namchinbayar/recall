@@ -27,7 +27,7 @@ from mcp.server.auth.provider import AccessToken
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from . import db, ingest, mcp_server, search
+from . import db, ingest, mcp_server, openitems, search
 from .agent import memory
 from .agent.tools import excerpt
 from .metrics import store as mstore
@@ -250,6 +250,39 @@ def do_event_counts(since: str) -> dict:
     return {"since": since, "total": sum(kinds.values()), "kinds": dict(kinds.most_common())}
 
 
+def do_open(days: int) -> dict:
+    """What sessions left open and nothing has closed, newest session first."""
+    from . import serve
+
+    out = serve.open_items(mcp_server._settings(), {"days": days, "limit": serve.OPEN_LIMIT[1]})
+    notes = [{
+        "source": n["source"], "title": n["title"], "at": n["date"], "folder": n["folder"], "kind": n["kind"],
+        "items": [{"id": i, "text": t} for i, t in zip(n["ids"], n["items"])],
+    } for n in out["notes"]]
+    return {"days": out["days"], "total": sum(len(n["items"]) for n in notes), "notes": notes}
+
+
+def do_open_done(item: str, how: str, why: str) -> dict:
+    try:
+        found = openitems.close_by_hand(mcp_server._settings(), item, how, why, by="app")
+    except LookupError as exc:
+        raise Refused(404, str(exc)) from None
+    return {"closed": {"id": found.id, "text": found.text}}
+
+
+def do_open_reopen(item: str) -> dict:
+    return {"reopened": openitems.Store(mcp_server._settings()).reopen(item)}
+
+
+def do_open_closed(limit: int) -> dict:
+    """The latest closures: what came off the list, how, why, and what closed it."""
+    return {"closed": [{
+        "id": r["_id"], "text": r.get("text", ""), "how": r.get("how", "done"), "why": r.get("why", ""),
+        "quote": r.get("quote", ""), "by": r.get("closed_by", ""), "at": _when(r.get("closed_at")),
+        "title": (r.get("title") or "").removeprefix("Session: "),
+    } for r in openitems.Store(mcp_server._settings()).recent(limit)]}
+
+
 def do_profile() -> dict:
     from . import learn
 
@@ -386,6 +419,33 @@ def register(server, verifier) -> None:
     @route("/profile", "GET", READ)
     async def profile(request: Request) -> dict:
         return await run(do_profile)
+
+    @route("/open", "GET", READ)
+    async def open_list(request: Request) -> dict:
+        return await run(do_open, _int(request, "days", 14, 1, 90))
+
+    @route("/open/closed", "GET", READ)
+    async def open_closed(request: Request) -> dict:
+        return await run(do_open_closed, _int(request, "limit", 30, 1, 200))
+
+    @route("/open/{id}/done", "POST", WRITE)
+    async def open_done(request: Request) -> dict:
+        body = await _body(request) if await request.body() else {}
+        how = body.get("how", "done")
+        if how not in openitems.HAND_HOWS:
+            raise Refused(400, f"how is one of: {', '.join(openitems.HAND_HOWS)}")
+        return await run(do_open_done, _open_id(request), how, _text(body, "why", openitems.MAX_WHY, required=False))
+
+    @route("/open/{id}/reopen", "POST", WRITE)
+    async def open_reopen(request: Request) -> dict:
+        return await run(do_open_reopen, _open_id(request))
+
+
+def _open_id(request: Request) -> str:
+    ident = request.path_params["id"]
+    if not openitems.ITEM_ID.match(ident):
+        raise Refused(400, "an open item's id looks like open:0123456789ab")
+    return ident
 
 
 def _memory_id(request: Request) -> str:

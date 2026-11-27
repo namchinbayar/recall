@@ -283,11 +283,13 @@ def catch_up(settings: Settings, days: int = 7, now: datetime | None = None, wit
         where = "Hermes" if "hermes" in (r.get("tags") or []) else (
             ((r.get("session") or {}).get("cwd") or "").replace(str(Path.home()), "~") or "Claude Code")
         lines.append(f"- {day}  {title}  ({where}; {r['source']})")
-        for item in (opened.get(r["source"]) or {}).get("items", [])[:4]:
-            lines.append(f"    open: {item}")
+        note = opened.get(r["source"]) or {}
+        for item, item_id in list(zip(note.get("items", []), note.get("ids", [])))[:4]:
+            lines.append(f"    open: {item}  [{item_id}]")
     head = f"# Sessions in the last {days} day{'s' if days != 1 else ''}, newest first"
     out.append(f"{head}\n" + ("\n".join(lines) if lines else "none"))
-    out.append("Search recall with a session's source id, or its title words, for the whole note.")
+    out.append("Search recall with a session's source id, or its title words, for the whole note. "
+               "An open item that is done or dropped comes off the list by its id (close_open_item, or `recall open --done`).")
     return "\n\n".join(out)
 
 

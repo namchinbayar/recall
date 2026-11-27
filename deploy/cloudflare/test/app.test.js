@@ -16,8 +16,15 @@ const list = (source, name) => JSON.parse(new RegExp(`const ${name} = (\\[[^\\]]
 test("the page only refers to files that exist", () => {
 	const paths = [...read("app/index.html").matchAll(/(?:href|src)="(\/[^"#]*)"/g)].map((m) => m[1]);
 	assert.ok(paths.includes("/app.js") && paths.includes("/app.css") && paths.includes("/manifest.webmanifest"));
-	for (const path of paths) assert.ok(inApp(path) || path in { "/search": 1, "/memories": 1, "/timeline": 1 }, `${path} is missing`);
+	for (const path of paths) assert.ok(inApp(path) || path in { "/search": 1, "/memories": 1, "/timeline": 1, "/open": 1 }, `${path} is missing`);
 	for (const [, font] of read("app/app.css").matchAll(/url\("([^"]+)"\)/g)) assert.ok(inApp(font), `${font} is missing`);
+});
+
+test("the Open page is a page of the app and closes items through the API", () => {
+	const app = read("app/app.js");
+	assert.match(app, /"\/open": openItems/);
+	assert.match(app, /api\(`\/open\/\$\{encodeURIComponent\(item\.id\)\}\/\$\{closing \? "done" : "reopen"\}`, \{ method: "POST" \}\)/);
+	assert.match(app, /"aria-describedby": textId/);      // each Done button is tied to the item it closes
 });
 
 test("the manifest can be installed: a fixed id and icons that exist", () => {

@@ -33,8 +33,11 @@ async def test_tool_list_and_hints():
     assert set(tools) == {
         "profile", "catch_up", "search", "remember", "forget", "list_memories", "list_sources", "save_url_or_file",
         "save_note", "recent_events", "metrics_summary", "metrics_manual", "record_metric",
+        "open_items", "close_open_item", "reopen_open_item",
     }
     assert tools["search"].annotations.read_only_hint is True
+    assert tools["open_items"].annotations.read_only_hint is True
+    assert tools["close_open_item"].annotations.destructive_hint is False
     assert tools["forget"].annotations.destructive_hint is True
     assert not any("vault" in name for name in tools)
 
@@ -115,3 +118,35 @@ async def test_unconfigured_reports_cleanly(monkeypatch):
         result = await client.call_tool("list_sources", {})
     assert result.is_error and "not configured" in result.content[0].text
     mcp_server._settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_open_items_are_listed_with_ids_and_closed_only_by_a_real_id(monkeypatch):
+    from recall import openitems, serve
+
+    notes = [{"source": "session:a", "title": "Older work", "date": "2026-11-08T12:00:00+00:00", "folder": "~/x", "kind": "claude",
+              "items": ["Nothing is pushed.", "Sign in on the phone."], "ids": ["open:0123456789ab", "open:ba9876543210"]}]
+    monkeypatch.setattr(mcp_server, "_settings", lambda: None)
+    monkeypatch.setattr(serve, "open_items", lambda settings, req: {"ok": True, "days": req["days"], "notes": notes if req["days"] > 1 else []})
+    closed = []
+
+    def close(settings, item, how, why, by):
+        if item != "open:0123456789ab":
+            raise LookupError(f"no session note of the last 90 days lists {item}")
+        closed.append((item, how, why, by))
+        return openitems.Item(item, "Nothing is pushed.", "session:a", "Older work", None)
+
+    monkeypatch.setattr(openitems, "close_by_hand", close)
+    async with Client(mcp_server.mcp) as client:
+        listing = (await client.call_tool("open_items", {})).content[0].text
+        assert listing.startswith("2 open item(s) from 1 session(s) in the last 14 days")
+        assert "2026-11-08  Older work  (~/x; session:a)" in listing and "- Nothing is pushed.  [open:0123456789ab]" in listing
+        assert (await client.call_tool("open_items", {"days": 1})).content[0].text == "nothing is open from the last 1 days"
+
+        done = await client.call_tool("close_open_item", {"item": "open:0123456789ab", "why": "They pushed it this morning."})
+        assert done.content[0].text == "closed (done): Nothing is pushed."
+        assert closed == [("open:0123456789ab", "done", "They pushed it this morning.", "assistant")]
+        missing = await client.call_tool("close_open_item", {"item": "open:ffffffffffff", "how": "dropped"})
+        assert missing.is_error and "no session note" in missing.content[0].text
+        bad = await client.call_tool("reopen_open_item", {"item": "memory:0123456789ab"})
+        assert bad.is_error and "open:0123456789ab" in bad.content[0].text

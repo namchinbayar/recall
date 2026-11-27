@@ -118,6 +118,7 @@ async def test_online_offers_every_tool_except_the_local_only_one(settings):
     assert tools == {
         "profile", "catch_up", "search", "remember", "forget", "list_memories", "list_sources",
         "save_note", "recent_events", "metrics_summary", "metrics_manual", "record_metric",
+        "open_items", "close_open_item", "reopen_open_item",
         "vault_list", "vault_get", "vault_save",
     }
     assert "save_url_or_file" in {fn.__name__ for fn, scope, _ in mcp_server.TOOLS if scope is None}

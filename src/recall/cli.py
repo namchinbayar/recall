@@ -292,7 +292,7 @@ def open_cmd(
     limit: Annotated[int | None, typer.Option("--limit", help="With --settle: at most this many notes.")] = None,
 ) -> None:
     """What sessions left open and no later session settled. The sessions service keeps it current."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timezone
 
     from . import openitems, serve
 
@@ -303,12 +303,11 @@ def open_cmd(
         typer.echo(f"{reopen} is open again" if store.reopen(reopen) else f"{reopen} was not closed")
         return
     if done:
-        found = [i for s in openitems.read_notes(serve._note_chunks(settings, now - timedelta(days=90)))
-                 for i in s.items if i.id == done]
-        if not found:
-            raise SystemExit(f"no open item {done} in the session notes of the last 90 days")
-        store.close(found[0], "done", why or "closed by hand", "hand", now)
-        typer.echo(f"closed: {found[0].text}")
+        try:
+            item = openitems.close_by_hand(settings, done, "done", why or "", "hand", store, now)
+        except (LookupError, ValueError) as exc:
+            raise SystemExit(str(exc)) from None
+        typer.echo(f"closed: {item.text}")
         return
     if settle:
         start = sessions_mod.parse_since(since, now)
@@ -334,9 +333,10 @@ def open_cmd(
         if not rows:
             typer.echo("nothing was closed yet")
         for r in rows:
-            by = "by hand" if r.get("closed_by") == "hand" else r.get("closed_by", "?")
+            by = {"hand": "by hand", "app": "in the app", "assistant": "through an assistant"}.get(r.get("closed_by"), r.get("closed_by", "?"))
             typer.secho(f"{r['closed_at'].astimezone():%Y-%m-%d}  {r.get('how', 'done'):<8} {r['text'][:110]}", bold=True)
-            typer.echo(f"            {r.get('why', '')}")
+            if r.get("why"):
+                typer.echo(f"            {r['why']}")
             if r.get("quote"):
                 typer.secho(f"            \"{r['quote'][:150]}\"", fg="bright_black")
             typer.secho(f"            {r['_id']}  from {r.get('title', r.get('source', '?'))[:60]}  closed {by}", fg="bright_black")
