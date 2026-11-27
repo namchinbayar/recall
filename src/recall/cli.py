@@ -282,6 +282,8 @@ def sessions_cmd(
 @app.command(name="open")
 def open_cmd(
     days: Annotated[int, typer.Option("--days", help="How far back to look for open items.")] = 14,
+    kind: Annotated[str | None, typer.Option("--kind", help="Only one kind: step, todo, waiting, check or idea.")] = None,
+    everything: Annotated[bool, typer.Option("--all", help="Also the unverified caveats and ideas older than a week.")] = False,
     closed: Annotated[bool, typer.Option("--closed", help="List the latest closures: what was settled, by which session, and why.")] = False,
     done: Annotated[str | None, typer.Option("--done", help="Close one item by hand (its open:… id).")] = None,
     why: Annotated[str | None, typer.Option("--why", help="With --done: the reason to record.")] = None,
@@ -312,6 +314,9 @@ def open_cmd(
     if settle:
         start = sessions_mod.parse_since(since, now)
         if dry_run:
+            unsorted = openitems.classify_pending(settings, store, None, start, typer.echo, now, limit)
+            typer.echo(f"dry run: {unsorted['items']} item(s) in {unsorted['asked']} note(s) to sort by kind "
+                       f"(about {int(unsorted['chars'] / openitems.CHARS_PER_TOKEN):,} tokens in)")
             counts = openitems.settle_pending(settings, store, None, start, typer.echo, now, limit)
             model = openitems_model()
             price = sessions_mod.PRICES.get(model)
@@ -323,9 +328,9 @@ def open_cmd(
         settler = openitems.Settler(settings)
         counts = settler.run(typer.echo, start, limit)
         typer.echo(f"open items: {counts['closed']} closed by {counts['asked']} note(s), {counts['nothing']} with nothing to settle, "
-                   f"{counts['failed']} failed ({settler.usage['calls']} model call(s), {settler.usage['input']:,} tokens in, "
-                   f"{settler.usage['output']:,} out, {settler.model})")
-        if counts["failed"]:
+                   f"{counts['failed']} failed; {counts['sorted']} sorted by kind ({settler.usage['calls']} model call(s), "
+                   f"{settler.usage['input']:,} tokens in, {settler.usage['output']:,} out, {settler.model})")
+        if counts["failed"] or counts["sort_failed"]:
             raise typer.Exit(1)
         return
     if closed:
@@ -341,14 +346,18 @@ def open_cmd(
                 typer.secho(f"            \"{r['quote'][:150]}\"", fg="bright_black")
             typer.secho(f"            {r['_id']}  from {r.get('title', r.get('source', '?'))[:60]}  closed {by}", fg="bright_black")
         return
-    out = serve.open_items(settings, {"days": days, "limit": 100}, now)
+    if kind and kind not in openitems.KINDS:
+        raise SystemExit(f"--kind is one of: {', '.join(openitems.KINDS)}")
+    out = serve.open_items(settings, {"days": days, "limit": 100, "all": everything, "kinds": [kind] if kind else None}, now)
     total = sum(len(n["items"]) for n in out["notes"])
-    typer.secho(f"{total} open item(s) from {len(out['notes'])} session(s) in the last {out['days']} days", fg="bright_black")
+    tally = {k: sum(n["kinds"].count(k) for n in out["notes"]) for k in openitems.KIND_ORDER}
+    typer.secho(f"{total} open item(s) from {len(out['notes'])} session(s) in the last {out['days']} days: "
+                + ", ".join(f"{n} {openitems.KIND_NAMES[k]}" for k, n in tally.items() if n), fg="bright_black")
     for n in out["notes"]:
         typer.secho(f"\n{(n['date'] or '')[:10]}  {n['title']}  ({n['folder'] or n['kind']})", bold=True)
-        for item_id, text in zip(n["ids"], n["items"]):
+        for item_id, text, k in zip(n["ids"], n["items"], n["kinds"]):
             typer.echo(textwrap.fill(text, 100, initial_indent="  - ", subsequent_indent="    "))
-            typer.secho(f"    {item_id}", fg="bright_black")
+            typer.secho(f"    {openitems.KIND_NAMES[k]}  {item_id}", fg="bright_black")
 
 
 def openitems_model() -> str:

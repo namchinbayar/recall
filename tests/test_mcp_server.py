@@ -125,9 +125,11 @@ async def test_open_items_are_listed_with_ids_and_closed_only_by_a_real_id(monke
     from recall import openitems, serve
 
     notes = [{"source": "session:a", "title": "Older work", "date": "2026-11-08T12:00:00+00:00", "folder": "~/x", "kind": "claude",
-              "items": ["Nothing is pushed.", "Sign in on the phone."], "ids": ["open:0123456789ab", "open:ba9876543210"]}]
+              "items": ["Sign in on the phone.", "Nothing is pushed."], "ids": ["open:ba9876543210", "open:0123456789ab"],
+              "kinds": ["step", "other"]}]
+    asked = []
     monkeypatch.setattr(mcp_server, "_settings", lambda: None)
-    monkeypatch.setattr(serve, "open_items", lambda settings, req: {"ok": True, "days": req["days"], "notes": notes if req["days"] > 1 else []})
+    monkeypatch.setattr(serve, "open_items", lambda settings, req: asked.append(req) or {"ok": True, "days": req["days"], "notes": notes if req["days"] > 1 else []})
     closed = []
 
     def close(settings, item, how, why, by):
@@ -140,7 +142,11 @@ async def test_open_items_are_listed_with_ids_and_closed_only_by_a_real_id(monke
     async with Client(mcp_server.mcp) as client:
         listing = (await client.call_tool("open_items", {})).content[0].text
         assert listing.startswith("2 open item(s) from 1 session(s) in the last 14 days")
-        assert "2026-11-08  Older work  (~/x; session:a)" in listing and "- Nothing is pushed.  [open:0123456789ab]" in listing
+        assert "2026-11-08  Older work  (~/x; session:a)" in listing
+        assert "- (yours) Sign in on the phone.  [open:ba9876543210]\n- (unsorted) Nothing is pushed.  [open:0123456789ab]" in listing
+        await client.call_tool("open_items", {"days": 3, "kind": "step", "everything": True})
+        assert asked[0]["kinds"] is None and asked[0]["all"] is False
+        assert (asked[1]["kinds"], asked[1]["all"], asked[1]["days"]) == (["step"], True, 3)
         assert (await client.call_tool("open_items", {"days": 1})).content[0].text == "nothing is open from the last 1 days"
 
         done = await client.call_tool("close_open_item", {"item": "open:0123456789ab", "why": "They pushed it this morning."})

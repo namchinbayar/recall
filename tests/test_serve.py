@@ -346,6 +346,19 @@ def test_rejoin_drops_the_chunk_overlap():
     assert serve.still_open(serve.rejoin(pieces))[0] == "Nothing is pushed to GitHub."
 
 
+class Stored:
+    """What open_items asks its store: which items are closed, and what kind each one is."""
+
+    def __init__(self, closed=(), kinds=None):
+        self.gone, self.sorted = set(closed), dict(kinds or {})
+
+    def closed(self, ids):
+        return self.gone & set(ids)
+
+    def kinds(self, sources):
+        return self.sorted
+
+
 def test_open_items_groups_notes_newest_first():
     from recall import chunk
 
@@ -364,7 +377,7 @@ def test_open_items_groups_notes_newest_first():
         return data
 
     out = serve.open_items(None, {"days": 999}, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=load,
-                           closed=lambda settings, ids: set())
+                           store=Stored())
     assert out["days"] == 90 and seen["since"] == datetime(2026, 8, 16, tzinfo=timezone.utc)
     assert [n["source"] for n in out["notes"]] == ["session:b", "session:a"]
     assert out["notes"][0]["title"] == "Newer work" and out["notes"][0]["kind"] == "claude"
@@ -374,9 +387,24 @@ def test_open_items_groups_notes_newest_first():
     # an item a later session settled leaves the list, and a note with nothing left leaves with it
     gone = set(out["notes"][0]["ids"]) | {out["notes"][1]["ids"][0]}
     after = serve.open_items(None, {"days": 999}, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=load,
-                             closed=lambda settings, ids: gone & set(ids))
+                             store=Stored(gone))
     assert [n["source"] for n in after["notes"]] == ["session:a"]
     assert after["notes"][0]["items"] == out["notes"][1]["items"][1:]
+    assert out["notes"][0]["kinds"] == ["other", "other"]                # nothing sorted yet
+
+    # sorted by kind: the owner's step first, a caveat last; caveats and ideas older than a week drop out
+    pushed, gmail = out["notes"][1]["ids"]
+    kinds = {pushed: "check", gmail: "step", out["notes"][0]["ids"][0]: "idea", out["notes"][0]["ids"][1]: "todo"}
+    at = dict(now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=load, store=Stored(kinds=kinds))
+    fresh = serve.open_items(None, {"days": 30}, **at)
+    assert fresh["notes"][1]["kinds"] == ["step", "check"] and fresh["notes"][1]["ids"] == [gmail, pushed]
+    assert fresh["notes"][0]["kinds"] == ["todo", "idea"]
+    later = dict(at, now=datetime(2026, 11, 18, tzinfo=timezone.utc))      # session:a is now 9 days old, session:b 8
+    aged = serve.open_items(None, {"days": 30}, **later)
+    assert [n["kinds"] for n in aged["notes"]] == [["todo"], ["step"]]
+    assert [n["kinds"] for n in serve.open_items(None, {"days": 30, "all": True}, **later)["notes"]] == [["todo", "idea"], ["step", "check"]]
+    only = serve.open_items(None, {"days": 30, "kinds": ["step"]}, **at)
+    assert [n["source"] for n in only["notes"]] == ["session:a"] and only["notes"][0]["items"] == ["The Gmail connector needs reconnecting."]
 
 
 def test_answer_routes_open_items(monkeypatch):
@@ -420,11 +448,11 @@ def test_catch_up_lists_every_session_newest_first_with_what_it_left_open():
             + rows("session:hermes:b", "Session: Chat with Hermes (2026-11-12)", 12, "## Done\n- all", ("session-note", "hermes")))
     profile = {"text": "**Who he is**\n- Sam.", "written": datetime(2026, 11, 13, tzinfo=timezone.utc)}
     text = serve.catch_up(None, 7, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=lambda s, d: data,
-                          load_profile=lambda s: profile, closed=lambda s, ids: set())
+                          load_profile=lambda s: profile, store=Stored(kinds={"open:" + "0" * 12: "step"}))
     assert text.startswith("# Who the user is (profile written 2026-11-13)\n**Who he is**")
     chat, older = text.index("Chat with Hermes"), text.index("Older work")
     assert chat < older and "(Hermes; session:hermes:b)" in text and "(/srv/proj; session:a)" in text
     assert "    open: Nothing is pushed to GitHub." in text
     bare = serve.catch_up(None, 7, now=datetime(2026, 11, 14, tzinfo=timezone.utc), load=lambda s, d: [], with_profile=False,
-                          closed=lambda s, ids: set())
+                          store=Stored())
     assert "Who the user is" not in bare and "none" in bare

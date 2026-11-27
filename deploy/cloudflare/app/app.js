@@ -240,10 +240,10 @@ async function restore(memory, after) {
 
 const itemHref = (source) => `/item?${new URLSearchParams({ id: source })}`;
 
-function chips(current, choices, href) {
-	return el("nav", { class: "chips", "aria-label": "Show" },
+function chips(current, choices, href, label = "Show") {
+	return el("nav", { class: "chips", "aria-label": label },
 		choices.map(([value, name, total]) =>
-			el("a", { href: href(value), "aria-current": value === current ? "true" : null },
+			el("a", { href: href(value), "data-chip": value, "aria-current": value === current ? "true" : null },
 				name, total == null ? null : el("span", { class: "count" }, count(total)))),
 	);
 }
@@ -635,6 +635,11 @@ async function item({ params, paint }) {
 // keeps every closure with Reopen, so nothing depends on a message that disappears.
 
 const CLOSED_BY = { hand: "by hand", app: "in the app", assistant: "through an assistant" };
+// The kinds an item can have, in the order they are offered. "step" is what only you can do.
+const OPEN_KINDS = [
+	["step", "Yours"], ["todo", "Unfinished"], ["waiting", "Waiting"], ["check", "Unverified"], ["idea", "Ideas"], ["other", "Not sorted"],
+];
+const openKindName = (kind) => OPEN_KINDS.find(([value]) => value === kind)?.[1] ?? "Not sorted";
 
 async function openItems({ params, paint }) {
 	const showing = params.get("show") === "closed" ? "closed" : "open";
@@ -658,34 +663,62 @@ async function openItems({ params, paint }) {
 	}
 
 	const data = await api(`/open?days=${days}`);
+	const tally = { ...(data.kinds ?? {}) };
 	let total = data.total ?? 0;
-	const changed = (by) => {
-		total += by;
-		const shown = main.querySelector('.chips a[aria-current="true"] .count');
-		if (shown) shown.textContent = count(total);
+	// Your own steps first: they are what the list is for. Everything else is one tap away.
+	const asked = params.get("kind");
+	const kind = asked === "all" || OPEN_KINDS.some(([value]) => value === asked) ? asked : (tally.step ? "step" : "all");
+	const link = (to, span = days) => {
+		const query = new URLSearchParams();
+		if (to !== "step") query.set("kind", to);
+		if (span !== 14) query.set("days", String(span));
+		return query.size ? `/open?${query}` : "/open";
 	};
+	const kinds = () => chips(kind, [
+		...OPEN_KINDS.filter(([value]) => tally[value] || value === kind).map(([value, name]) => [value, name, tally[value] ?? 0]),
+		["all", "All", total],
+	], (value) => link(value), "Kind");
+	const setCount = (chip, value) => {
+		const shown = main.querySelector(`.chips a[data-chip="${chip}"] .count`);
+		if (shown) shown.textContent = count(value);
+	};
+	const changed = (by, of) => {
+		total += by;
+		tally[of] = (tally[of] ?? 0) + by;
+		setCount("open", total);
+		setCount("all", total);
+		setCount(of, tally[of]);
+	};
+	const notes = (data.notes ?? [])
+		.map((note) => ({ ...note, items: note.items.filter((item) => kind === "all" || (item.kind ?? "other") === kind) }))
+		.filter((note) => note.items.length);
 	const other = days === 14
-		? el("a", { href: "/open?days=90" }, "Show the last 90 days")
-		: el("a", { href: "/open" }, "Show the last 14 days");
+		? el("a", { href: link(kind, 90) }, "Show the last 90 days")
+		: el("a", { href: link(kind, 14) }, "Show the last 14 days");
 	paint(head(total),
-		(data.notes ?? []).length
-			? el("div", { class: "open-notes" }, data.notes.map((note) => openNote(note, changed)))
-			: empty(`Nothing is open from the last ${data.days ?? days} days.`),
+		total ? kinds() : null,
+		notes.length
+			? el("div", { class: "open-notes" }, notes.map((note) => openNote(note, changed, kind === "all")))
+			: empty(total ? "Nothing of this kind is open." : `Nothing is open from the last ${data.days ?? days} days.`),
 		el("p", { class: "small muted open-foot" }, `From the sessions of the last ${data.days ?? days} days. `, other));
 }
 
-function openNote(note, changed) {
+function openNote(note, changed, labelled) {
 	const where = note.folder ?? (note.kind === "hermes" ? "Hermes" : null);
 	return el("div", { class: "open-note" },
 		el("p", { class: "label kind-session" }, [day(note.at), where].filter(Boolean).join(" · ")),
 		el("h2", {}, el("a", { href: itemHref(note.source) }, note.title)),
-		el("ul", { class: "open-list", role: "list" }, note.items.map((item) => openRow(item, changed))));
+		el("ul", { class: "open-list", role: "list" }, note.items.map((item) => openRow(item, changed, labelled))));
 }
 
-function openRow(item, changed) {
+function openRow(item, changed, labelled) {
 	const textId = `open-${item.id.replace(/[^0-9a-z]/g, "-")}`;
 	const button = el("button", { class: "button quiet", type: "button", "aria-describedby": textId }, "Done");
-	const row = el("li", { class: "open-row" }, el("p", { id: textId }, inline(item.text)), button);
+	const row = el("li", { class: "open-row" },
+		el("div", {},
+			el("p", { id: textId }, inline(item.text)),
+			labelled ? el("p", { class: "small muted" }, openKindName(item.kind)) : null),
+		button);
 	button.addEventListener("click", async () => {
 		if (!busy(button, true)) return;
 		const closing = !row.classList.contains("closed");
@@ -693,7 +726,7 @@ function openRow(item, changed) {
 			await api(`/open/${encodeURIComponent(item.id)}/${closing ? "done" : "reopen"}`, { method: "POST" });
 			row.classList.toggle("closed", closing);
 			button.textContent = closing ? "Undo" : "Done";
-			changed(closing ? -1 : 1);
+			changed(closing ? -1 : 1, item.kind ?? "other");
 			toast(closing ? "Marked done" : "Back on the list");
 		} catch (error) {
 			if (!(error instanceof SignedOut)) toast(error.message);

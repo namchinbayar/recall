@@ -304,7 +304,9 @@ a.tile:hover { background: var(--surface-2); }
 .open-list { display: flex; flex-direction: column; margin: 4px 0 0; padding: 0; list-style: none; }
 .open-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding-block: 6px; }
 .open-row p { font-size: 15px; color: var(--text); overflow-wrap: anywhere; }
-.open-row.closed p { color: var(--muted); text-decoration: line-through; }
+.open-row p.small { font-size: 13px; color: var(--muted); }
+.open-row.closed p:first-child { color: var(--muted); text-decoration: line-through; }
+.page-head + .chips { margin-block-end: 14px; }
 .open-foot { margin-block-start: 18px; }
 .open-foot a { color: var(--blue); }
 

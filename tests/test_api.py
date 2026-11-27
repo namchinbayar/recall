@@ -307,11 +307,13 @@ def test_open_items_come_back_as_ids_with_their_text(monkeypatch):
     from recall import serve
 
     notes = [{"source": "session:a", "title": "Older work", "date": "2026-11-08T12:00:00+00:00", "folder": "~/x", "kind": "claude",
-              "items": ["Nothing is pushed.", "Sign in."], "ids": [OPEN, "open:ba9876543210"]}]
+              "items": ["Sign in.", "Nothing is pushed."], "ids": ["open:ba9876543210", OPEN], "kinds": ["step", "check"]}]
     monkeypatch.setattr(api.mcp_server, "_settings", lambda: None)
-    monkeypatch.setattr(serve, "open_items", lambda settings, req: {"ok": True, "days": req["days"], "notes": notes})
+    asked = []
+    monkeypatch.setattr(serve, "open_items", lambda settings, req: asked.append(req) or {"ok": True, "days": req["days"], "notes": notes})
     out = api.do_open(30)
-    assert (out["days"], out["total"]) == (30, 2)
+    assert (out["days"], out["total"], out["kinds"]) == (30, 2, {"step": 1, "check": 1})
+    assert asked[0]["all"] is True                       # the page shows everything; it filters by kind itself
     assert out["notes"][0] == {"source": "session:a", "title": "Older work", "at": "2026-11-08T12:00:00+00:00", "folder": "~/x",
-                               "kind": "claude", "items": [{"id": OPEN, "text": "Nothing is pushed."},
-                                                           {"id": "open:ba9876543210", "text": "Sign in."}]}
+                               "kind": "claude", "items": [{"id": "open:ba9876543210", "text": "Sign in.", "kind": "step"},
+                                                           {"id": OPEN, "text": "Nothing is pushed.", "kind": "check"}]}

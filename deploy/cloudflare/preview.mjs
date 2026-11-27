@@ -65,12 +65,15 @@ const within = (since) => events.filter((event) => Date.now() - Date.parse(`${ev
 
 const openNotes = [
 	{ source: "session:demo-1", title: "Phone sign-in and the new Home", at: ago(300), folder: "~/Projects/recall", kind: "claude", items: [
-		{ id: "open:0123456789ab", text: "Sign-in was not tested on the phone. Open the app once to confirm." },
-		{ id: "open:1123456789ab", text: "The `RELEASE` setting is not shown anywhere in the app." },
-		{ id: "open:2123456789ab", text: "Decide whether saved pages should keep their images." },
+		{ id: "open:0123456789ab", kind: "step", text: "Sign-in was not tested on the phone. Open the app once to confirm." },
+		{ id: "open:2123456789ab", kind: "step", text: "Decide whether saved pages should keep their images." },
+		{ id: "open:1123456789ab", kind: "todo", text: "The `RELEASE` setting is not shown anywhere in the app." },
+		{ id: "open:4123456789ab", kind: "check", text: "Offline use was not tested with the connection off." },
+		{ id: "open:5123456789ab", kind: "idea", text: "A weekly digest of what was saved could go to the phone." },
 	] },
 	{ source: "session:demo-2", title: "Chat about the weekend plans", at: ago(2000), folder: null, kind: "hermes", items: [
-		{ id: "open:3123456789ab", text: "Book the table for Saturday." },
+		{ id: "open:3123456789ab", kind: "step", text: "Book the table for Saturday." },
+		{ id: "open:6123456789ab", kind: "waiting", text: "The restaurant will confirm by email." },
 	] },
 ];
 const closedItems = [
@@ -83,7 +86,9 @@ async function sample(method, url, body) {
 	const q = url.searchParams;
 	if (method === "GET" && path === "/open") {
 		const notes = openNotes.map((n) => ({ ...n, items: n.items.filter((i) => !closedItems.some((c) => c.id === i.id)) })).filter((n) => n.items.length);
-		return [200, { days: Math.min(Number(q.get("days") ?? 14), 90), total: notes.reduce((sum, n) => sum + n.items.length, 0), notes }];
+		const kinds = {};
+		for (const item of notes.flatMap((n) => n.items)) kinds[item.kind] = (kinds[item.kind] ?? 0) + 1;
+		return [200, { days: Math.min(Number(q.get("days") ?? 14), 90), total: notes.reduce((sum, n) => sum + n.items.length, 0), notes, kinds }];
 	}
 	if (method === "GET" && path === "/open/closed") return [200, { closed: closedItems }];
 	if (method === "POST" && /^\/open\/[^/]+\/done$/.test(path)) {
