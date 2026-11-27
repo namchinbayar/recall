@@ -52,6 +52,7 @@ mcp = MCPServer("recall", instructions=INSTRUCTIONS)
 
 READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 EXCERPT_CHARS = 700
+OPEN_NOTES = 100         # sessions in one open_items answer: enough for a model to read, not the whole fortnight
 
 ADD = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
 
@@ -153,11 +154,13 @@ def open_items(
 
     from . import openitems
 
-    req = {"days": days, "limit": serve.OPEN_LIMIT[1], "all": everything, "kinds": [kind] if kind else None}
+    req = {"days": days, "limit": OPEN_NOTES, "all": everything, "kinds": [kind] if kind else None}
     out = serve.open_items(_settings(), req)
     if not out["notes"]:
         return f"nothing is open from the last {out['days']} days" + (f" of kind {kind}" if kind else "")
     lines = [f"{sum(len(n['items']) for n in out['notes'])} open item(s) from {len(out['notes'])} session(s) in the last {out['days']} days"]
+    if len(out["notes"]) == OPEN_NOTES:
+        lines[0] += f" (the {OPEN_NOTES} most recent sessions; ask for fewer days or one kind to see further back)"
     for n in out["notes"]:
         lines.append(f"\n{(n['date'] or '')[:10]}  {n['title']}  ({n['folder'] or n['kind']}; {n['source']})")
         lines.extend(f"- ({openitems.KIND_NAMES.get(k, k)}) {text}  [{item_id}]" for item_id, text, k in zip(n["ids"], n["items"], n["kinds"]))

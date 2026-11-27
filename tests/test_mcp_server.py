@@ -145,7 +145,7 @@ async def test_open_items_are_listed_with_ids_and_closed_only_by_a_real_id(monke
         assert "2026-11-08  Older work  (~/x; session:a)" in listing
         assert "- (yours) Sign in on the phone.  [open:ba9876543210]\n- (unsorted) Nothing is pushed.  [open:0123456789ab]" in listing
         await client.call_tool("open_items", {"days": 3, "kind": "step", "everything": True})
-        assert asked[0]["kinds"] is None and asked[0]["all"] is False
+        assert asked[0]["kinds"] is None and asked[0]["all"] is False and asked[0]["limit"] == 100
         assert (asked[1]["kinds"], asked[1]["all"], asked[1]["days"]) == (["step"], True, 3)
         assert (await client.call_tool("open_items", {"days": 1})).content[0].text == "nothing is open from the last 1 days"
 

@@ -348,7 +348,7 @@ def open_cmd(
         return
     if kind and kind not in openitems.KINDS:
         raise SystemExit(f"--kind is one of: {', '.join(openitems.KINDS)}")
-    out = serve.open_items(settings, {"days": days, "limit": 100, "all": everything, "kinds": [kind] if kind else None}, now)
+    out = serve.open_items(settings, {"days": days, "limit": serve.OPEN_LIMIT[1], "all": everything, "kinds": [kind] if kind else None}, now)
     total = sum(len(n["items"]) for n in out["notes"])
     tally = {k: sum(n["kinds"].count(k) for n in out["notes"]) for k in openitems.KIND_ORDER}
     typer.secho(f"{total} open item(s) from {len(out['notes'])} session(s) in the last {out['days']} days: "

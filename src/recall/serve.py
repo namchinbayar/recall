@@ -210,7 +210,9 @@ def status(settings: Settings) -> dict:
 
 
 OPEN_DAYS = (1, 90, 14)      # (min, max, default) for open_items
-OPEN_LIMIT = (1, 100, 30)
+# Notes in one answer. A busy fortnight leaves well over a hundred sessions with something open,
+# so the ceiling is high: a caller that shows the whole list (the app, `recall open`) asks for it.
+OPEN_LIMIT = (1, 1000, 30)
 _TITLE_DAY = re.compile(r"\s*\(\d{4}-\d{2}-\d{2}\)$")
 
 
