@@ -468,7 +468,11 @@ by the main instance, so turn those off for the profile.
   equally relevant chunks wins. A session note is a record of one day and is never
   brought up to date, so when a newer source of another kind (a memory, a synced
   note, a saved page) scores within `RECALL_RECORD_MARGIN` of it (default 0.075;
-  0 turns this off), the session note is placed just below that source. `recall init` creates both indexes, and the
+  0 turns this off), the session note is placed just below that source. With
+  `RECALL_OWNER` set, the reranker gets the query and each candidate with "the user"
+  written as that name: notes kept by assistants say "the user's watch" where a
+  question says "Ada's watch", and the reranker otherwise reads them as two people.
+  `recall init` creates both indexes, and the
   plain index on tag and date that the lists and counts (memories, events,
   session notes) read from; run it again after an update that adds one. Without
   the text index it falls back to vector search alone and says so on stderr;
