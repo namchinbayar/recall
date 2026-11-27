@@ -314,6 +314,7 @@ def test_open_items_come_back_as_ids_with_their_text(monkeypatch):
     out = api.do_open(30)
     assert (out["days"], out["total"], out["kinds"]) == (30, 2, {"step": 1, "check": 1})
     assert asked[0]["all"] is True                       # the page shows everything; it filters by kind itself
+    assert asked[0]["limit"] == serve.OPEN_LIMIT[1] >= 1000   # and every session of the window, not the first hundred
     assert out["notes"][0] == {"source": "session:a", "title": "Older work", "at": "2026-11-08T12:00:00+00:00", "folder": "~/x",
                                "kind": "claude", "items": [{"id": "open:ba9876543210", "text": "Sign in.", "kind": "step"},
                                                            {"id": OPEN, "text": "Nothing is pushed.", "kind": "check"}]}
