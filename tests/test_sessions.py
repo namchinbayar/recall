@@ -227,6 +227,19 @@ def test_a_session_found_under_two_roots_counts_once_using_the_longer_copy(tmp_p
     assert len(found) == 1 and found[0].size > short.size and "two" in str(found[0].path)
 
 
+def test_default_roots_are_every_claude_folder_in_home_that_holds_transcripts(tmp_path, monkeypatch):
+    for name in (".claude", ".claude2", ".claude-second", ".config", ".claude-empty"):
+        (tmp_path / name).mkdir()
+    for name in (".claude", ".claude2", ".claude-second", ".config"):
+        (tmp_path / name / "projects").mkdir()
+    (tmp_path / ".claude.json").write_text("{}")
+    (tmp_path / ".claude-linked").symlink_to(tmp_path / ".claude2")       # two names, one folder: read once
+    assert [p.parent.name for p in sessions.default_roots(tmp_path)] == [".claude", ".claude-second", ".claude2"]
+
+    monkeypatch.setenv("RECALL_SESSION_ROOTS", f"{tmp_path}/a:{tmp_path}/b")      # the setting replaces them
+    assert sessions.roots() == [tmp_path / "a", tmp_path / "b"]
+
+
 def test_sessions_in_the_skip_file_are_never_candidates(tmp_path):
     transcript(tmp_path / "t", BASIC, name="keep")
     transcript(tmp_path / "t", BASIC, name="hide")

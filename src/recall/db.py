@@ -50,6 +50,12 @@ def retired(settings: Settings) -> Collection:
     return client(settings)[settings.db_name]["retired"]
 
 
+def open_items(settings: Settings) -> Collection:
+    """Which "Still open" items of session notes were settled, and which notes were looked at
+    for that (openitems.py). The notes themselves stay as they were written."""
+    return client(settings)[settings.db_name]["open_items"]
+
+
 def state(settings: Settings) -> Collection:
     """Small bookkeeping documents for `recall learn`: one per conversation, the profile, the import mark."""
     return client(settings)[settings.db_name]["learn_state"]

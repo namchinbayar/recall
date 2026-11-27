@@ -98,6 +98,44 @@ def search_cmd(
         typer.echo()
 
 
+@app.command(name="eval")
+def eval_cmd(
+    file: Annotated[Path | None, typer.Option("--file", help="Question set (default ~/.config/recall/eval.toml).")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="How many results count as found.")] = 5,
+    no_rerank: Annotated[bool, typer.Option("--no-rerank", help="Rank by retrieval order alone.")] = False,
+    pool: Annotated[int | None, typer.Option("--pool", help="Candidates the reranker reads.")] = None,
+    save: Annotated[bool, typer.Option("--save", help="Keep this run as the baseline later runs are compared with.")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="List every question, not only the ones that went wrong.")] = False,
+) -> None:
+    """Ask every question in the question set and report how often search found the answer."""
+    from . import evals
+
+    cases = evals.load(file)
+    settings = config.load()
+    rerank = not no_rerank and bool(settings.rerank_model)
+    how = {"limit": limit, "rerank": settings.rerank_model if rerank else None, "pool": pool, "model": settings.voyage_model}
+    typer.secho(f"{len(cases)} questions, top {limit}, embeddings {settings.voyage_model}, "
+                f"rerank {how['rerank'] or 'off'}" + (f", pool {pool}" if pool else ""), fg="bright_black")
+
+    def ask(case: evals.Case) -> list:
+        return search.search(settings, case.q, limit=limit, tags=list(case.tags) or None,
+                             include_events=case.events, rerank=rerank, pool=pool, when=True)
+
+    with typer.progressbar(length=len(cases), label="asking") as bar:
+        outcomes = evals.run(cases, ask, evals.stored_sources(settings), progress=lambda i: bar.update(1))
+    baseline = evals.load_baseline()
+    for line in evals.report(outcomes, limit, baseline, verbose):
+        typer.echo(line)
+    if not rerank:
+        typer.secho("without the reranker a score is a place in the list, not relevance: "
+                    "ignore the quiet questions in this run", fg="bright_black")
+    if save:
+        evals.save_baseline(evals.snapshot(outcomes, how))
+        typer.secho(f"saved as the baseline ({evals.BASELINE})", fg="bright_black")
+    elif baseline is None:
+        typer.secho("no baseline yet: run it again with --save to keep this one", fg="bright_black")
+
+
 @app.command(name="list")
 def list_cmd() -> None:
     """List stored sources."""
@@ -236,6 +274,84 @@ def sessions_cmd(
     typer.echo(f"sessions: {done} ({usage['calls']} model call(s), {usage['input']:,} tokens in, {usage['output']:,} out, {model})")
     if counts.get("failed"):
         raise typer.Exit(1)
+
+
+@app.command(name="open")
+def open_cmd(
+    days: Annotated[int, typer.Option("--days", help="How far back to look for open items.")] = 14,
+    closed: Annotated[bool, typer.Option("--closed", help="List the latest closures: what was settled, by which session, and why.")] = False,
+    done: Annotated[str | None, typer.Option("--done", help="Close one item by hand (its open:… id).")] = None,
+    why: Annotated[str | None, typer.Option("--why", help="With --done: the reason to record.")] = None,
+    reopen: Annotated[str | None, typer.Option("--reopen", help="Put a closed item back on the list.")] = None,
+    settle: Annotated[bool, typer.Option("--settle", help="Ask which open items the session notes since --since settled.")] = False,
+    since: Annotated[str, typer.Option("--since", help="With --settle: notes since then, 36h, 30d or 2026-10-01.")] = "3d",
+    dry_run: Annotated[bool, typer.Option("--dry-run", "-n", help="With --settle: how many notes would be asked about, and the estimated cost.")] = False,
+    limit: Annotated[int | None, typer.Option("--limit", help="With --settle: at most this many notes.")] = None,
+) -> None:
+    """What sessions left open and no later session settled. The sessions service keeps it current."""
+    from datetime import datetime, timedelta, timezone
+
+    from . import openitems, serve
+
+    settings = config.load()
+    store = openitems.Store(settings)
+    now = datetime.now(timezone.utc)
+    if reopen:
+        typer.echo(f"{reopen} is open again" if store.reopen(reopen) else f"{reopen} was not closed")
+        return
+    if done:
+        found = [i for s in openitems.read_notes(serve._note_chunks(settings, now - timedelta(days=90)))
+                 for i in s.items if i.id == done]
+        if not found:
+            raise SystemExit(f"no open item {done} in the session notes of the last 90 days")
+        store.close(found[0], "done", why or "closed by hand", "hand", now)
+        typer.echo(f"closed: {found[0].text}")
+        return
+    if settle:
+        start = sessions_mod.parse_since(since, now)
+        if dry_run:
+            counts = openitems.settle_pending(settings, store, None, start, typer.echo, now, limit)
+            model = openitems_model()
+            price = sessions_mod.PRICES.get(model)
+            tokens = int(counts["chars"] / openitems.CHARS_PER_TOKEN) + counts["asked"] * openitems.REVIEW_TOKENS
+            cost = "" if price is None else f", about ${(tokens * price[0] + counts['asked'] * openitems.REPLY_TOKENS * price[1]) / 1e6:.2f} on {model}"
+            typer.echo(f"dry run: {counts['asked']} note(s) to ask about (about {tokens:,} tokens in{cost}); "
+                       f"{counts['nothing']} with no earlier open item to settle")
+            return
+        settler = openitems.Settler(settings)
+        counts = settler.run(typer.echo, start, limit)
+        typer.echo(f"open items: {counts['closed']} closed by {counts['asked']} note(s), {counts['nothing']} with nothing to settle, "
+                   f"{counts['failed']} failed ({settler.usage['calls']} model call(s), {settler.usage['input']:,} tokens in, "
+                   f"{settler.usage['output']:,} out, {settler.model})")
+        if counts["failed"]:
+            raise typer.Exit(1)
+        return
+    if closed:
+        rows = store.recent(40)
+        if not rows:
+            typer.echo("nothing was closed yet")
+        for r in rows:
+            by = "by hand" if r.get("closed_by") == "hand" else r.get("closed_by", "?")
+            typer.secho(f"{r['closed_at'].astimezone():%Y-%m-%d}  {r.get('how', 'done'):<8} {r['text'][:110]}", bold=True)
+            typer.echo(f"            {r.get('why', '')}")
+            if r.get("quote"):
+                typer.secho(f"            \"{r['quote'][:150]}\"", fg="bright_black")
+            typer.secho(f"            {r['_id']}  from {r.get('title', r.get('source', '?'))[:60]}  closed {by}", fg="bright_black")
+        return
+    out = serve.open_items(settings, {"days": days, "limit": 100}, now)
+    total = sum(len(n["items"]) for n in out["notes"])
+    typer.secho(f"{total} open item(s) from {len(out['notes'])} session(s) in the last {out['days']} days", fg="bright_black")
+    for n in out["notes"]:
+        typer.secho(f"\n{(n['date'] or '')[:10]}  {n['title']}  ({n['folder'] or n['kind']})", bold=True)
+        for item_id, text in zip(n["ids"], n["items"]):
+            typer.echo(textwrap.fill(text, 100, initial_indent="  - ", subsequent_indent="    "))
+            typer.secho(f"    {item_id}", fg="bright_black")
+
+
+def openitems_model() -> str:
+    from . import learn
+
+    return learn.model_name()
 
 
 @app.command(name="learn")

@@ -143,8 +143,10 @@ recall sessions --since 30d            # then do it
 recall search "why did we change the reranker" --tag session-note
 ```
 
-- It reads `~/.claude/projects` and `~/.claude2/projects` (`RECALL_SESSION_ROOTS`,
-  colon-separated, to change that). Sub-agent transcripts are left out.
+- It reads the `projects` folder of `~/.claude` and of every other folder in the home
+  directory whose name starts with `.claude` (a second account, a second desktop app), so
+  a new one is picked up without a setting. `RECALL_SESSION_ROOTS`, colon-separated, names
+  the folders instead. Sub-agent transcripts are left out.
 - Only what was said goes to the model: your messages, the assistant's replies,
   and one line per command run or file edited. Tool output, images and
   reasoning are left out, and a message over 6,000 characters keeps its start
@@ -170,6 +172,50 @@ cp -r contrib/systemd/recall-sessions.service{,.d} ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now recall-sessions.service
 ```
+
+## Open items
+
+Every session note ends with a "Still open" list, and `recall catch-up`, the `open_items`
+request and anything built on them show those lists. A note is a record of its day and is
+never rewritten, so an item stayed on its list after a later session did it.
+
+`recall-sessions.service` now settles them. After each pass it shows every new session note
+(Claude Code and Hermes) to the model next to the items earlier sessions left open, and asks
+which of them this session settled:
+
+- **done**: the note shows the thing was done.
+- **dropped**: it was decided against, or what it concerns was removed or replaced.
+- **carried**: the note lists the same thing again as still open, so the older copy goes and
+  the newer one stands.
+
+```bash
+recall open                        # what is open now, by session, each item with its id
+recall open --closed               # the latest closures: how, why, the words quoted, the session that did it
+recall open --done open:1a2b3c4d5e6f --why "did it by hand"
+recall open --reopen open:1a2b3c4d5e6f
+recall open --settle --since 14d --dry-run   # how many notes would be asked about, and the cost
+recall open --settle --since 14d             # reach back once; the service only looks at the last 3 days
+```
+
+What the model may decide, and what code decides:
+
+- The model sees one note and at most 40 open items: those of earlier notes (up to 60 days
+  older) from the same folder, and those of notes close to it in meaning.
+- Code accepts a closure only for an item that was shown, with a reason, and with words
+  quoted from the note that are really in the note. A second call then looks at each proposed
+  closure alone and must agree; "work on the same subject" and "partly done" are a no.
+- At most eight closures per note. A note is looked at once, and again if its session
+  continues and the note is rewritten.
+- The notes are never changed, so a search still finds what was open on that day. Closures
+  live apart in the `open_items` collection; `--reopen` deletes one and the item is back.
+
+An item is open while its note still lists it and no closure exists for it. That only takes
+off what a later note shows was settled. On the first run over 14 days of notes (97 notes,
+294 items) it closed 31 items, 21 of them from that window; most of what stayed is a step
+only the owner can take or a caveat no session came back to, and those leave the list with
+`--done` or when they age out of the window. One note costs
+about 6,000 tokens in (a cent or two on Sonnet 5.5, less on Haiku), with the same model
+setting as `recall learn` (`RECALL_LEARN_MODEL`, else `RECALL_SUMMARY_MODEL`).
 
 ## Health check
 
@@ -201,6 +247,46 @@ cp -r contrib/systemd/recall-doctor.service{,.d} ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now recall-doctor.service
 ```
+
+## Search quality
+
+`recall eval` answers "did that change make search better or worse?". It reads a question
+set, puts each question through the same search the assistants use, and reports how often
+the answer came first, how often it was among the results, and which questions missed.
+
+```bash
+cp contrib/eval.example.toml ~/.config/recall/eval.toml   # then write your own questions
+recall eval                 # the numbers, and every question that went wrong
+recall eval --save          # keep this run as the baseline
+recall eval --no-rerank     # the same questions with one thing changed, against the baseline
+recall eval -v              # every question with its place and top score
+```
+
+```toml
+[[case]]
+q = "where do the services read their secrets from"
+expect = "file:~/notes/secrets-proton-pass.md"     # or a list: any of them counts
+avoid = "file:~/notes/secrets-1password.md"        # a replaced note that must not come first
+
+[[case]]
+q = "best sourdough hydration ratio"
+expect = []                                        # nothing stored answers it: stay quiet
+```
+
+- `expect` and `avoid` are source ids as `recall list` prints them; `*` matches any run of
+  characters and `file:~/` is the home folder.
+- A question with an empty `expect` passes when the top score stays under 0.55, the mark
+  below which the Hermes provider hands nothing over.
+- A question whose expected source is no longer stored is listed apart and not counted:
+  search cannot find what is not there.
+- With a baseline saved (`~/.local/state/recall/eval.json`), every later run ends with what
+  moved: which questions got better and which got worse.
+- Each question costs one embedding call and one rerank call. Nothing is written to the
+  database.
+
+Write the questions from the sources, the way they would really be asked, and not from what
+search returns today; otherwise the set only measures what already works. The question set
+is personal, so it stays outside the repository.
 
 ## Hermes memory provider
 
@@ -379,7 +465,10 @@ by the main instance, so turn those off for the profile.
   words: names, ids, error strings), reranks them with Voyage `rerank-3`, and
   adds a small recency bonus (`RECALL_RECENCY_WEIGHT`, default 0.05, halving
   every `RECALL_RECENCY_HALF_LIFE_DAYS`, default 30) so the newer of two
-  equally relevant chunks wins. `recall init` creates both indexes, and the
+  equally relevant chunks wins. A session note is a record of one day and is never
+  brought up to date, so when a newer source of another kind (a memory, a synced
+  note, a saved page) scores within `RECALL_RECORD_MARGIN` of it (default 0.075;
+  0 turns this off), the session note is placed just below that source. `recall init` creates both indexes, and the
   plain index on tag and date that the lists and counts (memories, events,
   session notes) read from; run it again after an update that adds one. Without
   the text index it falls back to vector search alone and says so on stderr;

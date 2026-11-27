@@ -11,6 +11,8 @@ SAVE THINGS
                                                    remove deleted ones (recall-sync.service loops it)
   recall sessions [--since 30d] [--dry-run]        a short note per finished Claude Code session:
                                                    done, decided, still open (recall-sessions.service)
+  recall open [--closed] [--done ID] [--reopen ID] what sessions left open and no later session settled;
+                                                   --closed lists what was taken off and why
   recall learn [--since 30d] [--dry-run]           read quiet Hermes conversations: keep lasting facts,
                                                    retire the ones they replace, write a record, keep
                                                    the profile current (recall-learn.service)
@@ -41,12 +43,15 @@ HEALTH
   recall doctor [--alert]          check services, database, search, embeddings, vault key
                                    (recall-doctor.service checks every 10 min and alerts the phone)
   recall doctor --test-alert       send one test message to the phone
+  recall eval [--save] [-v]        ask the questions in eval.toml and report how often search
+                                   found the answer; --save keeps the run as the baseline
 
 SETUP
   recall init                      create the vector index (once)
   recall stream purge [--yes]      drop noisy and repeated notifications (noise.toml)
   recall metrics init              create the time series collection (once)
   ~/.config/recall/sync.toml       folders and files for `recall sync` (contrib/sync.example.toml)
+  ~/.config/recall/eval.toml       questions and their answers for `recall eval` (contrib/eval.example.toml)
   config: $RECALL_ENV, ./.env, ~/.config/recall/env, or the project .env
 
 MORE
