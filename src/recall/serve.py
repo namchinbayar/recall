@@ -55,7 +55,10 @@ paste them into a prompt (the private homepage's detail drawers).
 most 90), newest first, and returns the bullets under each note's "## Still
 open" heading, without the ones a later session settled (openitems.py):
 {"ok": true, "notes": [{source, title, date, folder, kind, items: [...],
-ids: [...]}]}. Notes with nothing open are left out. It only reads.
+ids: [...], kinds: [...]}]}. Each item's kind is step, todo, waiting, check,
+idea or other; steps come first, and unverified caveats and ideas older than a
+week are left out unless "all" is true. "kinds": ["step"] keeps only those.
+Notes with nothing open are left out. It only reads.
 """
 
 from __future__ import annotations
@@ -220,30 +223,47 @@ def _bounded(req: dict, key: str, bounds: tuple[int, int, int]) -> int:
 
 
 def open_items(settings: Settings, req: dict, now: datetime | None = None,
-               load: Callable[[Settings, datetime], list[dict]] | None = None,
-               closed: Callable[[Settings, list[str]], set[str]] | None = None) -> dict:
+               load: Callable[[Settings, datetime], list[dict]] | None = None, store=None) -> dict:
     """What recent session notes left open and no later session settled (openitems.py). Read
-    only; vault entries are never session notes. `ids` runs parallel to `items`."""
+    only; vault entries are never session notes. `ids` and `kinds` run parallel to `items`.
+
+    In each note the owner's own steps come first and unverified caveats and ideas last; those
+    two kinds are left out once they are older than a week unless the request says "all": true.
+    "kinds": [...] keeps only the named kinds. `store` answers which items are closed and what
+    kind each one is (default: the database)."""
     from datetime import timedelta
 
     days, limit = _bounded(req, "days", OPEN_DAYS), _bounded(req, "limit", OPEN_LIMIT)
-    since = (now or datetime.now(timezone.utc)) - timedelta(days=days)
-    sessions = openitems.read_notes((load or _note_chunks)(settings, since))
+    now = now or datetime.now(timezone.utc)
+    sessions = openitems.read_notes((load or _note_chunks)(settings, now - timedelta(days=days)))
+    store = store or openitems.Store(settings)
     ids = [i.id for s in sessions for i in s.items]
-    gone = (closed or openitems.closed_ids)(settings, ids) if ids else set()
+    gone = store.closed(ids) if ids else set()
+    kind_of = store.kinds([s.source for s in sessions if s.items]) if ids else {}
+    wanted = {str(k) for k in req["kinds"]} if isinstance(req.get("kinds"), list) and req["kinds"] else None
+    everything = bool(req.get("all"))
     notes = []
     for s in sessions:
-        left = [i for i in s.items if i.id not in gone]
+        left = []
+        for i in s.items:
+            kind = kind_of.get(i.id, openitems.OTHER)
+            if i.id in gone or (wanted is not None and kind not in wanted):
+                continue
+            if not everything and openitems.aged_out(kind, s.when, now):
+                continue
+            left.append((i.id, i.text))
         if not left:
             continue
+        left = openitems.order(left, kind_of)
         notes.append({
             "source": s.source,
             "title": _TITLE_DAY.sub("", s.title.removeprefix("Session: ")).strip() or s.source,
             "date": s.when.isoformat() if s.when else None,
             "folder": s.folder,
             "kind": s.kind,
-            "items": [i.text for i in left],
-            "ids": [i.id for i in left],
+            "items": [text for _, text in left],
+            "ids": [item_id for item_id, _ in left],
+            "kinds": [kind_of.get(item_id, openitems.OTHER) for item_id, _ in left],
         })
     notes.sort(key=lambda n: n["date"] or "", reverse=True)
     return {"ok": True, "days": days, "notes": notes[:limit]}
@@ -251,8 +271,7 @@ def open_items(settings: Settings, req: dict, now: datetime | None = None,
 
 def catch_up(settings: Settings, days: int = 7, now: datetime | None = None, with_profile: bool = True,
              load: Callable[[Settings, datetime], list[dict]] | None = None,
-             load_profile: Callable[[Settings], dict | None] | None = None,
-             closed: Callable[[Settings, list[str]], set[str]] | None = None) -> str:
+             load_profile: Callable[[Settings], dict | None] | None = None, store=None) -> str:
     """Plain text for an assistant picking up where the user's others left off: the profile,
     then every session note of the last `days` days (Claude Code and Hermes alike),
     newest first, each with what it left open."""
@@ -263,7 +282,7 @@ def catch_up(settings: Settings, days: int = 7, now: datetime | None = None, wit
     days = min(max(int(days), 1), 60)
     now = now or datetime.now(timezone.utc)
     rows = (load or _note_chunks)(settings, now - timedelta(days=days))
-    opened = {n["source"]: n for n in open_items(settings, {"days": days, "limit": 500}, now, lambda s, d: rows, closed)["notes"]}
+    opened = {n["source"]: n for n in open_items(settings, {"days": days, "limit": 500}, now, lambda s, d: rows, store)["notes"]}
     firsts: dict[str, dict] = {}
     for r in rows:
         if r["source"] not in firsts or r.get("chunk_index", 0) < firsts[r["source"]].get("chunk_index", 0):
@@ -284,8 +303,9 @@ def catch_up(settings: Settings, days: int = 7, now: datetime | None = None, wit
             ((r.get("session") or {}).get("cwd") or "").replace(str(Path.home()), "~") or "Claude Code")
         lines.append(f"- {day}  {title}  ({where}; {r['source']})")
         note = opened.get(r["source"]) or {}
-        for item, item_id in list(zip(note.get("items", []), note.get("ids", [])))[:4]:
-            lines.append(f"    open: {item}  [{item_id}]")
+        for item, item_id, kind in list(zip(note.get("items", []), note.get("ids", []), note.get("kinds", [])))[:4]:
+            label = "" if kind == openitems.OTHER else f" ({openitems.KIND_NAMES[kind]})"
+            lines.append(f"    open{label}: {item}  [{item_id}]")
     head = f"# Sessions in the last {days} day{'s' if days != 1 else ''}, newest first"
     out.append(f"{head}\n" + ("\n".join(lines) if lines else "none"))
     out.append("Search recall with a session's source id, or its title words, for the whole note. "

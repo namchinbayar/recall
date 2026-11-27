@@ -11,8 +11,9 @@ SAVE THINGS
                                                    remove deleted ones (recall-sync.service loops it)
   recall sessions [--since 30d] [--dry-run]        a short note per finished Claude Code session:
                                                    done, decided, still open (recall-sessions.service)
-  recall open [--closed] [--done ID] [--reopen ID] what sessions left open and no later session settled;
-                                                   --closed lists what was taken off and why
+  recall open [--kind step] [--all] [--closed]     what sessions left open and no later session settled,
+              [--done ID] [--reopen ID]            your own steps first; --closed lists what was taken
+                                                   off and why
   recall learn [--since 30d] [--dry-run]           read quiet Hermes conversations: keep lasting facts,
                                                    retire the ones they replace, write a record, keep
                                                    the profile current (recall-learn.service)

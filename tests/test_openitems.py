@@ -24,13 +24,19 @@ def rows(source, day, text, cwd="/srv/x", tags=("session-note", "claude"), title
 
 class FakeStore:
     def __init__(self):
-        self.closures, self.marks = {}, {}
+        self.closures, self.marks, self.sorted = {}, {}, {}
 
     def closed(self, ids):
         return set(ids) & set(self.closures)
 
     def close(self, item, how, why, by, now, quote=""):
         self.closures[item.id] = {"text": item.text, "how": how, "why": why, "by": by}
+
+    def kinds(self, sources):
+        return {i: k for s in sources for i, k in self.sorted.get(s, {}).items()}
+
+    def set_kinds(self, source, kinds, now):
+        self.sorted[source] = dict(kinds)
 
     def looked_at(self, source):
         return self.marks.get(source)
@@ -244,3 +250,67 @@ def test_closing_by_hand_needs_a_real_item_and_records_where_it_was_said():
                 dict(item=push, why="the token is ghp_" + "a1B2" * 9)):
         with pytest.raises(ValueError):
             openitems.close_by_hand(None, **bad, **kw)
+
+
+def kinds_answer(**kinds):
+    return json.dumps({"kinds": [{"id": i, "kind": k} for i, k in kinds.items()]})
+
+
+def test_each_open_item_gets_one_kind_and_keeps_it():
+    data = (rows("session:a", 4, note(still=("Sign in on the phone.", "Nothing is committed.", "The link was not verified.")))
+            + rows("session:b", 10, note(still=("A refund is pending.",)))
+            + rows("session:c", 11, note(still=())))
+    ids = {text: openitems.item_id(source, text) for source, text in (
+        ("session:a", "Sign in on the phone."), ("session:a", "Nothing is committed."), ("session:a", "The link was not verified."),
+        ("session:b", "A refund is pending."))}
+    store, asked = FakeStore(), []
+
+    def ask(system, text, schema):
+        asked.append(text)
+        assert schema is openitems.KIND_SCHEMA and "need them" in system
+        if "Sign in" in text:        # one id comes back bare, one item is left out, one kind does not exist
+            return json.dumps({"kinds": [{"id": ids["Sign in on the phone."][5:], "kind": "step"},
+                                         {"id": ids["The link was not verified."], "kind": "caveat"}]})
+        return kinds_answer(**{ids["A refund is pending."]: "waiting"})
+
+    since = NOW - timedelta(days=30)
+    kw = dict(now=NOW, load=lambda s, d: data)
+    counts = openitems.classify_pending(None, store, ask, since, **kw)
+    assert (counts["asked"], counts["items"], counts["failed"]) == (2, 4, 0) and counts["chars"] > 500
+    assert store.sorted["session:a"] == {ids["Sign in on the phone."]: "step", ids["Nothing is committed."]: "other",
+                                         ids["The link was not verified."]: "other"}
+    assert store.sorted["session:b"] == {ids["A refund is pending."]: "waiting"} and "session:c" not in store.sorted
+    assert f"[{ids['Sign in on the phone.']}] Sign in on the phone." in asked[0] and "## Done" not in asked[0]
+
+    assert openitems.classify_pending(None, store, ask, since, **kw)["asked"] == 0 and len(asked) == 2      # nothing new
+
+    # the note is rewritten with one more item: only that one is asked about, the rest keep their kind
+    data[:] = [r for r in data if r["source"] != "session:b"] + rows("session:b", 10, note(still=("A refund is pending.", "Add a second card.")))
+    new = openitems.item_id("session:b", "Add a second card.")
+    counts = openitems.classify_pending(None, store, lambda *a: kinds_answer(**{new: "idea"}), since, **kw)
+    assert (counts["asked"], counts["items"]) == (1, 1)
+    assert store.sorted["session:b"] == {ids["A refund is pending."]: "waiting", new: "idea"}
+
+
+def test_sorting_skips_closed_items_and_a_dry_run_or_a_bad_answer_writes_nothing():
+    data = rows("session:a", 4, note(still=("Push it.", "Sign in on the phone.")))
+    push = openitems.item_id("session:a", "Push it.")
+    since = NOW - timedelta(days=30)
+    kw = dict(now=NOW, load=lambda s, d: data)
+    store = FakeStore()
+    store.closures[push] = {"text": "Push it."}
+    dry = openitems.classify_pending(None, store, None, since, **kw)
+    assert (dry["asked"], dry["items"]) == (1, 1) and store.sorted == {}
+    lines = []
+    bad = openitems.classify_pending(None, store, lambda *a: "sorry", since, lines.append, **kw)
+    assert (bad["failed"], bad["items"]) == (1, 0) and store.sorted == {} and "not sorted" in lines[0]
+
+
+def test_steps_come_first_and_only_caveats_and_ideas_age_out():
+    pairs = [("a", "caveat"), ("b", "step"), ("c", "unsorted"), ("d", "idea"), ("e", "todo"), ("f", "waiting")]
+    kinds = {"a": "check", "b": "step", "d": "idea", "e": "todo", "f": "waiting"}
+    assert [i for i, _ in openitems.order(pairs, kinds)] == ["b", "e", "f", "c", "a", "d"]
+    old, new = NOW - timedelta(days=openitems.AGE_DAYS, hours=1), NOW - timedelta(days=openitems.AGE_DAYS - 1)
+    assert openitems.aged_out("check", old, NOW) and openitems.aged_out("idea", old, NOW)
+    assert not openitems.aged_out("check", new, NOW) and not openitems.aged_out("step", old, NOW)
+    assert not openitems.aged_out("other", old, NOW) and not openitems.aged_out("check", None, NOW)

@@ -138,20 +138,29 @@ def catch_up(
 
 
 @tool(READ_SCOPE, title="Open items", annotations=READ)
-def open_items(days: Annotated[int, Field(ge=1, le=90, description="How far back to look.")] = 14) -> str:
-    """What their sessions left open and nothing has closed since: each session with its items
-    and their ids. Items a later session settled are already gone; many of the rest are steps
-    only they can take. Use it when they ask what is left to do, or to find the id of an item
-    they say is done."""
+def open_items(
+    days: Annotated[int, Field(ge=1, le=90, description="How far back to look.")] = 14,
+    kind: Annotated[Literal["step", "todo", "waiting", "check", "idea"] | None, Field(
+        description="Only one kind: step (only they can do it), todo (unfinished work), waiting (on someone or a date), "
+                    "check (not verified), idea (optional).")] = None,
+    everything: Annotated[bool, Field(description="Also the unverified caveats and ideas older than a week.")] = False,
+) -> str:
+    """What their sessions left open and nothing has closed since: each session with its items,
+    their kind and their ids. Items a later session settled are already gone. "yours" marks a
+    step only they can take; ask for kind="step" when they want to know what needs them. Use it
+    when they ask what is left to do, or to find the id of an item they say is done."""
     from . import serve
 
-    out = serve.open_items(_settings(), {"days": days, "limit": serve.OPEN_LIMIT[1]})
+    from . import openitems
+
+    req = {"days": days, "limit": serve.OPEN_LIMIT[1], "all": everything, "kinds": [kind] if kind else None}
+    out = serve.open_items(_settings(), req)
     if not out["notes"]:
-        return f"nothing is open from the last {out['days']} days"
+        return f"nothing is open from the last {out['days']} days" + (f" of kind {kind}" if kind else "")
     lines = [f"{sum(len(n['items']) for n in out['notes'])} open item(s) from {len(out['notes'])} session(s) in the last {out['days']} days"]
     for n in out["notes"]:
         lines.append(f"\n{(n['date'] or '')[:10]}  {n['title']}  ({n['folder'] or n['kind']}; {n['source']})")
-        lines.extend(f"- {text}  [{item_id}]" for item_id, text in zip(n["ids"], n["items"]))
+        lines.extend(f"- ({openitems.KIND_NAMES.get(k, k)}) {text}  [{item_id}]" for item_id, text, k in zip(n["ids"], n["items"], n["kinds"]))
     return "\n".join(lines)
 
 

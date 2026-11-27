@@ -254,12 +254,14 @@ def do_open(days: int) -> dict:
     """What sessions left open and nothing has closed, newest session first."""
     from . import serve
 
-    out = serve.open_items(mcp_server._settings(), {"days": days, "limit": serve.OPEN_LIMIT[1]})
+    out = serve.open_items(mcp_server._settings(), {"days": days, "limit": serve.OPEN_LIMIT[1], "all": True})
     notes = [{
         "source": n["source"], "title": n["title"], "at": n["date"], "folder": n["folder"], "kind": n["kind"],
-        "items": [{"id": i, "text": t} for i, t in zip(n["ids"], n["items"])],
+        "items": [{"id": i, "text": t, "kind": k} for i, t, k in zip(n["ids"], n["items"], n["kinds"])],
     } for n in out["notes"]]
-    return {"days": out["days"], "total": sum(len(n["items"]) for n in notes), "notes": notes}
+    kinds = Counter(item["kind"] for n in notes for item in n["items"])
+    return {"days": out["days"], "total": sum(kinds.values()), "notes": notes,
+            "kinds": {k: kinds[k] for k in openitems.KIND_ORDER if kinds[k]}}
 
 
 def do_open_done(item: str, how: str, why: str) -> dict:

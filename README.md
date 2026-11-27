@@ -188,13 +188,31 @@ which of them this session settled:
 - **carried**: the note lists the same thing again as still open, so the older copy goes and
   the newer one stands.
 
+Each open item also gets a **kind**, from one more small call per note, because a day of
+sessions leaves about sixty items and only some of them need you:
+
+| Kind | Shown as | What it is |
+|---|---|---|
+| `step` | yours | only you can do it: a tap, a sign-in, a choice, an answer |
+| `todo` | unfinished | work an assistant could pick up: not built, not fixed, not committed |
+| `waiting` | waiting | on someone else or on a date: a refund, a reply, a result |
+| `check` | unverified | something not tested or not confirmed, with no action attached |
+| `idea` | idea | an option nobody decided on |
+
+Lists put your steps first. Where assistants read the list (`catch-up`, the `open_items`
+request and tool), unverified caveats and ideas drop out after a week; the app's Open page
+and `recall open --all` keep showing them. An item keeps its kind for as long as its note
+lists it.
+
 ```bash
-recall open                        # what is open now, by session, each item with its id
+recall open                        # what is open now, by session, each item with its kind and id
+recall open --kind step            # only what needs you (step, todo, waiting, check or idea)
+recall open --all                  # also the unverified caveats and ideas older than a week
 recall open --closed               # the latest closures: how, why, the words quoted, the session that did it
 recall open --done open:1a2b3c4d5e6f --why "did it by hand"
 recall open --reopen open:1a2b3c4d5e6f
-recall open --settle --since 14d --dry-run   # how many notes would be asked about, and the cost
-recall open --settle --since 14d             # reach back once; the service only looks at the last 3 days
+recall open --settle --since 14d --dry-run   # how many notes would be asked about and sorted, and the cost
+recall open --settle --since 14d             # settle and sort once; the service only looks at the last 3 days
 ```
 
 What the model may decide, and what code decides:
@@ -768,7 +786,7 @@ token, checked exactly as for MCP, and each route needs its permission.
 | `GET /events?since=24h&source=` | read | notifications, digests and Hermes chats, newest first |
 | `GET /events/counts?since=24h` | read | how many events arrived, by kind |
 | `GET /profile` | read | the standing profile |
-| `GET /open?days=` | read | what sessions left open and nothing has closed, by session, each item with its id |
+| `GET /open?days=` | read | what sessions left open and nothing has closed, by session, each item with its id and kind, and a count per kind |
 | `POST /open/{id}/done` `{how, why}` | write | takes one item off the list (`how`: done or dropped; both fields optional) |
 | `POST /open/{id}/reopen` | write | puts a closed item back |
 | `GET /open/closed` | read | the latest closures: how, why, and what closed each |
@@ -784,8 +802,8 @@ A small web app for a phone or a desktop, served from the same address
 save box and tiles for memories, sources, what was learned lately, the last day's
 events and what is waiting to be read; the other pages search, list memories (forget,
 restore), show the timeline, the sources and one saved item. The Open page lists what
-sessions left open, with a Done button on each item and the closed ones under Closed,
-where Reopen puts one back. It can be added to the
+sessions left open, your own steps first and the other kinds one tap away, with a Done
+button on each item and the closed ones under Closed, where Reopen puts one back. It can be added to the
 home screen. `node deploy/cloudflare/preview.mjs` opens it on this machine with sample
 data and no sign-in.
 
