@@ -9,6 +9,14 @@
 #   tags    search only these tags, as `recall search --tag` does
 #   events  true to include notifications and Hermes exchanges
 #   note    anything you want to remember about the case
+#   group   a label of your own ("notes", "sessions", "exact words"); the report counts each
+#           group apart, which shows where search is weak
+#
+# A source that quotes these questions (the note of a session spent on this file, a README that
+# uses one as its example) matches them word for word. List such sources in `ignore`, above the
+# cases, and they are left out of every result:
+#
+#   ignore = ["session:0b1f6c1e-*"]
 #
 # Thirty to fifty questions is enough to see a change. Write them from the sources, not from what
 # search returns today, or the set only measures what already works.

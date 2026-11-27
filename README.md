@@ -281,6 +281,13 @@ expect = []                                        # nothing stored answers it: 
   search cannot find what is not there.
 - With a baseline saved (`~/.local/state/recall/eval.json`), every later run ends with what
   moved: which questions got better and which got worse.
+- A source that quotes the questions themselves (the note of a session spent on the
+  question set, a README that uses one as its example) matches them word for word. Put
+  `ignore = ["session:0b1f6c1e-*"]` above the cases and such sources are left out of
+  every result before it is judged.
+- A case can carry `group = "sessions"` (any label of your own). The report then counts
+  each group apart, which shows where search is weak: plain notes, a decision inside a
+  session note, a fact deep in a long note, a time in the question, exact words.
 - Each question costs one embedding call and one rerank call. Nothing is written to the
   database.
 
@@ -468,7 +475,11 @@ by the main instance, so turn those off for the profile.
   equally relevant chunks wins. A session note is a record of one day and is never
   brought up to date, so when a newer source of another kind (a memory, a synced
   note, a saved page) scores within `RECALL_RECORD_MARGIN` of it (default 0.075;
-  0 turns this off), the session note is placed just below that source. `recall init` creates both indexes, and the
+  0 turns this off), the session note is placed just below that source. With
+  `RECALL_OWNER` set, the reranker gets the query and each candidate with "the user"
+  written as that name: notes kept by assistants say "the user's watch" where a
+  question says "Ada's watch", and the reranker otherwise reads them as two people.
+  `recall init` creates both indexes, and the
   plain index on tag and date that the lists and counts (memories, events,
   session notes) read from; run it again after an update that adds one. Without
   the text index it falls back to vector search alone and says so on stderr;

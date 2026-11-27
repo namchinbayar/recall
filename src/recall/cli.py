@@ -117,12 +117,15 @@ def eval_cmd(
     typer.secho(f"{len(cases)} questions, top {limit}, embeddings {settings.voyage_model}, "
                 f"rerank {how['rerank'] or 'off'}" + (f", pool {pool}" if pool else ""), fg="bright_black")
 
+    ignore = evals.load_ignore(file)
+
     def ask(case: evals.Case) -> list:
-        return search.search(settings, case.q, limit=limit, tags=list(case.tags) or None,
+        return search.search(settings, case.q, limit=limit + len(ignore), tags=list(case.tags) or None,
                              include_events=case.events, rerank=rerank, pool=pool, when=True)
 
     with typer.progressbar(length=len(cases), label="asking") as bar:
-        outcomes = evals.run(cases, ask, evals.stored_sources(settings), progress=lambda i: bar.update(1))
+        outcomes = evals.run(cases, ask, evals.stored_sources(settings), progress=lambda i: bar.update(1),
+                             ignore=ignore, limit=limit)
     baseline = evals.load_baseline()
     for line in evals.report(outcomes, limit, baseline, verbose):
         typer.echo(line)

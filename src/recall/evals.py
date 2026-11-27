@@ -10,6 +10,7 @@ guess; with a saved baseline it is a before and an after.
     q = "where do the services get their secrets"
     expect = "file:~/notes/secrets.md"          # one source, or a list: any of them counts
     avoid = "file:~/notes/secrets-old.md"       # a replaced note that must not rank above it
+    group = "notes"                             # optional: the report counts each group apart
 
     [[case]]
     q = "best sourdough hydration"
@@ -18,6 +19,12 @@ guess; with a saved baseline it is a before and an after.
 `expect` and `avoid` are source ids as `recall list` prints them; `*` matches any run of
 characters and `file:~/` is the home folder. A question whose expected source is not stored
 (removed, renamed) is reported apart from the misses: search cannot find what is not there.
+
+A source that quotes the questions themselves (the note of a session spent on this question
+set, say) matches them word for word and would lead every list. Name such sources once, above
+the cases, and they are left out of every result before it is judged:
+
+    ignore = ["session:0b1f6c1e-*"]
 
 The question set is personal, so it lives outside the repository; see contrib/eval.example.toml.
 """
@@ -42,7 +49,7 @@ from .stream import spool
 CONFIG = Path(os.environ.get("RECALL_EVAL", "~/.config/recall/eval.toml")).expanduser()
 BASELINE = spool.STATE_DIR / "eval.json"
 QUIET_BELOW = MIN_SCORE     # under this the Hermes provider hands nothing over: that is "quiet"
-KEYS = {"q", "expect", "avoid", "tags", "events", "note"}
+KEYS = {"q", "expect", "avoid", "tags", "events", "note", "group"}
 
 
 @dataclass(frozen=True)
@@ -53,6 +60,7 @@ class Case:
     tags: tuple[str, ...] = ()
     events: bool = False
     note: str = ""
+    group: str = ""                     # a label of your own; the report counts each group apart
 
 
 @dataclass
@@ -105,10 +113,20 @@ def load(path: Path | None = None) -> list[Case]:
             tags=_list(c.get("tags", []), f"{where}: tags"),
             events=bool(c.get("events", False)),
             note=str(c.get("note", "")),
+            group=str(c.get("group", "")).strip(),
         ))
     if not cases:
         raise SystemExit(f"{path} has no [[case]] entries")
     return cases
+
+
+def load_ignore(path: Path | None = None) -> tuple[str, ...]:
+    """The question set's `ignore` list: sources left out of every result before it is judged."""
+    try:
+        data = tomllib.loads((path or CONFIG).read_text())
+    except (FileNotFoundError, tomllib.TOMLDecodeError):
+        return ()
+    return tuple(_pattern(p) for p in _list(data.get("ignore", []), f"{path or CONFIG}: ignore"))
 
 
 def stored_sources(settings: Settings) -> set[str]:
@@ -139,10 +157,15 @@ def judge(case: Case, hits: list[Hit], stored: set[str] | None = None, quiet_bel
 
 
 def run(cases: list[Case], search_fn: Callable[[Case], list[Hit]], stored: set[str] | None = None,
-        quiet_below: float = QUIET_BELOW, progress: Callable[[int], None] | None = None) -> list[Outcome]:
+        quiet_below: float = QUIET_BELOW, progress: Callable[[int], None] | None = None,
+        ignore: Iterable[str] = (), limit: int | None = None) -> list[Outcome]:
+    """`ignore`: sources dropped from each result; `limit`: how many results are judged after that
+    (so search_fn can fetch a few more than the limit to make up for the dropped ones)."""
+    ignore = tuple(ignore)
     out = []
     for i, case in enumerate(cases, 1):
-        out.append(judge(case, search_fn(case), stored, quiet_below))
+        hits = [h for h in search_fn(case) if not _matches(h.source, ignore)]
+        out.append(judge(case, hits[:limit] if limit else hits, stored, quiet_below))
         if progress:
             progress(i)
     return out
@@ -176,6 +199,15 @@ def summarize(outcomes: list[Outcome]) -> Summary:
         silent=len(silent),
         absent=sum(o.kind == "absent" for o in outcomes),
     )
+
+
+def by_group(outcomes: list[Outcome]) -> list[tuple[str, Summary]]:
+    """A summary per `group`, in the order the groups first appear; empty when no case names one."""
+    groups: dict[str, list[Outcome]] = {}
+    for o in outcomes:
+        if o.kind != "absent":
+            groups.setdefault(o.case.group or "(no group)", []).append(o)
+    return [(name, summarize(rows)) for name, rows in groups.items()] if set(groups) - {"(no group)"} else []
 
 
 # ----- the baseline: one saved run to compare the next one with ------------------
@@ -254,6 +286,14 @@ def report(outcomes: list[Outcome], limit: int, baseline: dict | None = None, ve
         lines.append(f"quiet when it should  {_share(s.quiet, s.silent)}")
     if any(o.case.avoid for o in outcomes):
         lines.append(f"replaced note on top  {s.stale}")
+    if groups := by_group(outcomes):
+        width = max(len(name) for name, _ in groups)
+        lines.extend(["", f"{'by group':<{width + 2}}  first  top {limit:<3} of"])
+        for name, g in groups:
+            if g.asked:
+                lines.append(f"  {name:<{width}}  {g.first:>5}  {g.found:>7}  {g.asked}")
+            if g.silent:
+                lines.append(f"  {name:<{width}}  quiet {g.quiet} of {g.silent}")
 
     def block(title: str, rows: list[Outcome], line: Callable[[Outcome], list[str]]) -> None:
         if rows:

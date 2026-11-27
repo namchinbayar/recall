@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -32,7 +33,7 @@ from datetime import datetime, timezone
 from pymongo.errors import OperationFailure
 
 from . import db, embed, when as when_mod
-from .config import Settings
+from .config import Settings, owner
 
 RECENCY_WEIGHT = float(os.environ.get("RECALL_RECENCY_WEIGHT", "0.05"))
 RECENCY_HALF_LIFE_DAYS = float(os.environ.get("RECALL_RECENCY_HALF_LIFE_DAYS", "30"))
@@ -227,11 +228,28 @@ def recency_bonus(created_at: datetime | None, now: datetime) -> float:
     return RECENCY_WEIGHT * math.pow(0.5, age_days / RECENCY_HALF_LIFE_DAYS)
 
 
+_THE_USER = re.compile(r"\bthe user('s)?(?![\w-])", re.I)
+
+
+def by_name(text: str, name: str | None = None) -> str:
+    """`text` with "the user" written as the owner's name (RECALL_OWNER), for the reranker only.
+
+    Notes that assistants keep say "the user's watch"; a question says "what watch does Ada
+    wear". The reranker reads the two as different people and scores the right note low
+    (measured: 0.42 against 0.79 for the same question asked about "the user"). Query and
+    candidates are both rewritten, so each side says the name. Nothing stored changes, and
+    without RECALL_OWNER nothing is rewritten."""
+    name = owner() if name is None else name
+    if not name or name == "the user":
+        return text
+    return _THE_USER.sub(lambda m: name + ("'s" if m.group(1) else ""), text)
+
+
 def rank(query: str, hits: list[Hit], limit: int, rerank_fn=None, now: datetime | None = None) -> list[Hit]:
     """Order candidates by rerank score (or retrieval order) plus the recency bonus."""
     now = now or datetime.now(timezone.utc)
     if rerank_fn is not None and hits:
-        scores = rerank_fn(query, [f"{h.title}\n{h.text}" for h in hits])
+        scores = rerank_fn(by_name(query), [by_name(f"{h.title}\n{h.text}") for h in hits])
     else:
         scores = [1.0 / (60 + i) * 60 for i in range(len(hits))]  # keep retrieval order, scaled to ~1
     for h, s in zip(hits, scores):

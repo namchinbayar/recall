@@ -308,3 +308,30 @@ def test_search_applies_it_only_when_the_reranker_scored_the_hits(monkeypatch):
     monkeypatch.setattr(search, "RECENCY_WEIGHT", 0)
     assert [h.source for h in search.search(SETTINGS, "q")] == ["file:new.md", "session:s"]
     assert [h.source for h in search.search(SETTINGS, "q", rerank=False)] == ["session:s", "file:new.md"]
+
+
+# ----- the reranker reads "the user" as the owner's name ------------------------------
+
+def test_by_name_writes_the_user_as_the_owner_and_leaves_the_rest():
+    assert search.by_name("The user's watch; the user wears it.", "Ada") == "Ada's watch; Ada wears it."
+    assert search.by_name("what does THE USER use", "Ada") == "what does Ada use"
+    assert search.by_name("the users table, the user-agent header, the username", "Ada") == "the users table, the user-agent header, the username"
+    assert search.by_name("the user's watch", "the user") == "the user's watch"        # no name set: nothing changes
+    assert search.by_name("the user's watch") == "the user's watch"                    # the tests run without RECALL_OWNER
+
+
+def test_rank_gives_the_reranker_query_and_candidates_by_name(monkeypatch):
+    seen = {}
+
+    def rerank(query, docs):
+        seen.update(query=query, docs=docs)
+        return [0.5 for _ in docs]
+
+    hits = [Hit("file:a.md", "Notes on the user", 0, "The user's watch is an Ultra.", 0.0, [])]
+    monkeypatch.setenv("RECALL_OWNER", "Ada")
+    out = search.rank("what watch does the user wear", hits, 5, rerank, now=NOW)
+    assert seen == {"query": "what watch does Ada wear", "docs": ["Notes on Ada\nAda's watch is an Ultra."]}
+    assert out[0].text == "The user's watch is an Ultra." and out[0].title == "Notes on the user"      # stored text is untouched
+    monkeypatch.delenv("RECALL_OWNER")
+    search.rank("what watch does the user wear", hits, 5, rerank, now=NOW)
+    assert seen["query"] == "what watch does the user wear" and seen["docs"] == ["Notes on the user\nThe user's watch is an Ultra."]
