@@ -42,7 +42,9 @@ stores what recall returns.
 What a browser blocks under those headers it reports to `/reports`
 (`src/reports.js`). The Worker writes each report to its log as one `browser-report`
 line, cut down first: page addresses lose their query, and a Trusted Types report
-keeps the name of the place that was written to, not the text. Nothing is stored. Read
+keeps the name of the place that was written to, not the text. Reports about the two
+scripts Cloudflare itself adds to every page (its analytics beacon and a bot-detection
+snippet, both refused by the policy) are left out. Nothing is stored. Read
 them with `wrangler tail recall-online --search browser-report`, or in the Worker's
 logs in the dashboard. A browser only sends these reports over HTTPS, so
 `preview.mjs` never receives one.

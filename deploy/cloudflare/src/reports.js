@@ -46,6 +46,14 @@ export function summary(report) {
 	};
 }
 
+/** Whether a report is about a script the host adds to every page, not about the app.
+ *  Cloudflare puts its analytics beacon and a bot-detection snippet into each HTML answer; the
+ *  app's policy refuses both, on every page view, and a log full of them would hide a real one. */
+export function expected(line) {
+	return line.blocked.startsWith("https://static.cloudflareinsights.com/")
+		|| (line.blocked === "inline" && line.sample.startsWith("window.__CF$"));
+}
+
 /** Take a browser's report request, log each report as one line, and say nothing back. */
 export async function receive(request, log = console.log) {
 	if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
@@ -59,7 +67,9 @@ export async function receive(request, log = console.log) {
 	}
 	const reports = Array.isArray(data) ? data : [data];
 	for (const report of reports.slice(0, MAX_REPORTS)) {
-		if (report && typeof report === "object") log(`browser-report ${JSON.stringify(summary(report))}`);
+		if (!report || typeof report !== "object") continue;
+		const line = summary(report);
+		if (!expected(line)) log(`browser-report ${JSON.stringify(line)}`);
 	}
 	return done;
 }

