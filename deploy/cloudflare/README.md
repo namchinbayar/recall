@@ -33,8 +33,19 @@ The app itself is the files in `app/`, served by Cloudflare as static assets (th
 `assets` block in `wrangler.jsonc`) without running the Worker. Every page address
 gets `index.html`; the paths under `run_worker_first` (the MCP endpoint, `/api`, the
 sign-in) always go to the Worker. `app/_headers` sets the security headers: the pages
-load nothing from other sites and run no inline script. `app/sw.js` keeps the app's
-own files on the device so it opens offline; it never stores what recall returns.
+load nothing from other sites and run no inline script, and Trusted Types are required,
+so a string cannot be written into the page as HTML or handed over as a script's
+address except through the one policy the app names (`recall`, which knows `/sw.js`).
+`app/sw.js` keeps the app's own files on the device so it opens offline; it never
+stores what recall returns.
+
+What a browser blocks under those headers it reports to `/reports`
+(`src/reports.js`). The Worker writes each report to its log as one `browser-report`
+line, cut down first: page addresses lose their query, and a Trusted Types report
+keeps the name of the place that was written to, not the text. Nothing is stored. Read
+them with `wrangler tail recall-online --search browser-report`, or in the Worker's
+logs in the dashboard. A browser only sends these reports over HTTPS, so
+`preview.mjs` never receives one.
 
 ```bash
 node preview.mjs     # the app on http://127.0.0.1:8793 with sample data and no sign-in

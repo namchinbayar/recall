@@ -1,6 +1,11 @@
 # Sent with every file of the app. The pages load nothing from other sites and run no inline script.
+# Trusted Types are required: a string cannot be written into the page as HTML or handed over as a
+# script's address, except through the one policy the app names ("recall", which knows /sw.js).
+# What a browser blocks under this policy it reports to /reports (src/reports.js), so a mistake
+# in these headers shows up in the Worker's log instead of as a page that quietly stopped working.
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Reporting-Endpoints: default="/reports"
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'report-sample'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types recall; report-uri /reports; report-to default
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer

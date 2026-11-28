@@ -64,16 +64,83 @@ function dayHeading(date) {
 	return days === 0 ? `Today · ${full}` : days === 1 ? `Yesterday · ${full}` : full;
 }
 
-let toastTimer;
-function toast(message) {
-	const box = document.getElementById("toast");
-	box.textContent = message;
-	box.classList.add("show");
-	clearTimeout(toastTimer);
-	toastTimer = setTimeout(() => {
-		box.classList.remove("show");
-		box.textContent = "";
-	}, 4000);
+// ----- messages ---------------------------------------------------------------
+// A message about what just happened. Each one is its own manual popover: it sits above
+// everything else and leaves only when it is closed. A confirmation is closed after a few
+// seconds, because the page already shows what changed. An error stays until it is dismissed,
+// so a failed action cannot go by unnoticed.
+
+const toasts = document.getElementById("toasts");
+const POPOVER = Object.hasOwn(HTMLElement.prototype, "popover"); // without it a message is a fixed box
+const STAY_MS = 4000;
+let toastCount = 0;
+
+/** Say it to a screen reader: ariaNotify where the browser has it, else the page's live region. */
+function announce(message, urgent) {
+	if (typeof document.ariaNotify === "function") return document.ariaNotify(message, { priority: urgent ? "high" : "normal" });
+	const region = document.getElementById("announce");
+	document.getElementById("announce-label").hidden = false;
+	region.textContent = "";
+	requestAnimationFrame(() => { region.textContent = message; });
+}
+
+/** Lift each message above the ones under it. */
+function stackToasts() {
+	let lift = 0;
+	for (const box of [...toasts.children].reverse()) {
+		box.style.setProperty("--lift", `${lift}px`);
+		lift += box.offsetHeight + 8;
+	}
+}
+
+function toast(message, { error = false } = {}) {
+	// Under the confirm dialog a message could be neither seen nor reached: show it once that closes.
+	if (dialog.open) return dialog.addEventListener("close", () => toast(message, { error }), { once: true });
+	if (!error) for (const old of toasts.querySelectorAll(".toast:not(.error)")) old.dispatchEvent(new Event("leave"));
+
+	const id = `toast-${++toastCount}`;
+	const from = document.activeElement; // where the focus was, to give it back
+	const close = el("button", {
+		class: "toast-close", type: "button", "aria-label": "Dismiss",
+		...(POPOVER ? { popovertarget: id, popovertargetaction: "hide" } : {}),
+	}, icon("M6 6l12 12M18 6L6 18", 16, 2));
+	const box = el("div", { id, class: error ? "toast error" : "toast", ...(POPOVER ? { popover: "manual" } : {}) },
+		el("p", {}, message), close);
+	let timer;
+	let hadFocus = false;
+
+	const gone = () => {
+		if (!box.isConnected) return;
+		clearTimeout(timer);
+		const next = box.previousElementSibling ?? box.nextElementSibling;
+		box.remove();
+		stackToasts();
+		// Dismissed with the focus on it: on to the next message, or back to where the focus was.
+		if (hadFocus) (next?.querySelector("button") ?? (from?.isConnected ? from : main)).focus({ preventScroll: true });
+	};
+	const leave = () => {
+		hadFocus = box.contains(document.activeElement);
+		if (POPOVER && box.matches(":popover-open")) box.hidePopover(); // its toggle event calls gone()
+		else gone();
+	};
+	box.addEventListener("beforetoggle", (event) => { if (event.newState === "closed") hadFocus = box.contains(document.activeElement); });
+	box.addEventListener("toggle", (event) => { if (event.newState === "closed") gone(); });
+	box.addEventListener("leave", leave);
+	if (!POPOVER) close.addEventListener("click", leave);
+
+	toasts.append(box);
+	if (POPOVER) box.showPopover();
+	stackToasts();
+	requestAnimationFrame(() => box.classList.add("in"));
+	announce(message, error);
+	if (!error) {
+		// Not while it is being read or reached for: wait until the pointer and the focus have left it.
+		const expire = () => {
+			if (box.contains(document.activeElement) || box.matches(":hover")) timer = setTimeout(expire, 1000);
+			else leave();
+		};
+		timer = setTimeout(expire, STAY_MS);
+	}
 }
 
 /** Mark a button busy without disabling it, so it keeps the focus. Returns false when it already is. */
@@ -179,7 +246,7 @@ async function signOut(event) {
 		await fetch("/auth/logout", { method: "POST", headers: { "X-Recall-App": "1" } });
 		signIn();
 	} catch {
-		toast("Could not sign out: recall could not be reached.");
+		toast("Could not sign out: recall could not be reached.", { error: true });
 		busy(button, false);
 	}
 }
@@ -222,7 +289,7 @@ async function forget(memory, after) {
 		toast("Forgotten");
 		after();
 	} catch (error) {
-		if (!(error instanceof SignedOut)) toast(error.message);
+		if (!(error instanceof SignedOut)) toast(error.message, { error: true });
 	}
 }
 
@@ -232,7 +299,7 @@ async function restore(memory, after) {
 		toast("Restored");
 		after();
 	} catch (error) {
-		if (!(error instanceof SignedOut)) toast(error.message);
+		if (!(error instanceof SignedOut)) toast(error.message, { error: true });
 	}
 }
 
@@ -315,7 +382,7 @@ function saveTile(saved) {
 		const value = text.value.trim();
 		const as = chosen();
 		if (!value) return text.focus();
-		if (as === "memory" && value.length > 2000) return toast("A memory holds up to 2,000 characters. Save this as a note.");
+		if (as === "memory" && value.length > 2000) return toast("A memory holds up to 2,000 characters. Save this as a note.", { error: true });
 		if (!busy(submit, true)) return;
 		try {
 			if (as === "memory") await api("/memories", { method: "POST", body: { fact: value } });
@@ -325,7 +392,7 @@ function saveTile(saved) {
 			saved();
 		} catch (error) {
 			if (error instanceof SignedOut) sessionStorage.setItem(DRAFT, value);
-			else toast(error.message);
+			else toast(error.message, { error: true });
 		} finally {
 			busy(submit, false);
 		}
@@ -520,7 +587,7 @@ async function memories({ params, paint }) {
 		}[showing];
 		paint(head(status), rows.length ? el("div", { class: "list" }, rows.map((memory) => memoryRow(memory, reload))) : empty(none));
 	};
-	const reload = () => load().catch((error) => { if (!(error instanceof SignedOut)) toast(error.message); });
+	const reload = () => load().catch((error) => { if (!(error instanceof SignedOut)) toast(error.message, { error: true }); });
 	await load();
 }
 
@@ -658,7 +725,7 @@ async function openItems({ params, paint }) {
 				? el("div", { class: "list" }, rows.map((row) => closedRow(row, reload)))
 				: empty("Nothing has been closed yet. An item leaves the list when a later session settles it, or when you mark it done."));
 		};
-		const reload = () => load().catch((error) => { if (!(error instanceof SignedOut)) toast(error.message); });
+		const reload = () => load().catch((error) => { if (!(error instanceof SignedOut)) toast(error.message, { error: true }); });
 		return load();
 	}
 
@@ -729,7 +796,7 @@ function openRow(item, changed, labelled) {
 			changed(closing ? -1 : 1, item.kind ?? "other");
 			toast(closing ? "Marked done" : "Back on the list");
 		} catch (error) {
-			if (!(error instanceof SignedOut)) toast(error.message);
+			if (!(error instanceof SignedOut)) toast(error.message, { error: true });
 		} finally {
 			busy(button, false);
 		}
@@ -750,7 +817,7 @@ function closedRow(row, after) {
 			after();
 		} catch (error) {
 			busy(button, false);
-			if (!(error instanceof SignedOut)) toast(error.message);
+			if (!(error instanceof SignedOut)) toast(error.message, { error: true });
 		}
 	};
 	return el("div", { class: "row" },
@@ -849,6 +916,21 @@ addEventListener("popstate", () => {
 // Back online: reload a page that failed to load.
 addEventListener("online", () => { if (main.querySelector("[data-error]")) show(); });
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+// The one place a script's address is handed to the browser. The app's headers require Trusted
+// Types, so the address has to come from a named policy, and this policy knows a single one.
+const WORKER = "/sw.js";
+const scripts = (window.trustedTypes ?? { createPolicy: (name, rules) => rules }).createPolicy("recall", {
+	createScriptURL(url) {
+		if (url !== WORKER) throw new TypeError(`not a script of this app: ${url}`);
+		return url;
+	},
+});
+if ("serviceWorker" in navigator) {
+	try {
+		navigator.serviceWorker.register(scripts.createScriptURL(WORKER)).catch(() => {});
+	} catch {
+		// The app works without its offline copy.
+	}
+}
 
 show();

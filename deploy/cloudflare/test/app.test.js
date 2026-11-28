@@ -27,6 +27,18 @@ test("the Open page is a page of the app and closes items through the API", () =
 	assert.match(app, /"aria-describedby": textId/);      // each Done button is tied to the item it closes
 });
 
+test("a failure is a message that stays, and every message can be dismissed", () => {
+	const app = read("app/app.js");
+	assert.doesNotMatch(app, /toast\(error\.message\)/);                        // a failure never uses the short-lived kind
+	assert.ok([...app.matchAll(/toast\(error\.message, \{ error: true \}\)/g)].length >= 7);
+	assert.match(app, /popover: "manual"/);
+	assert.match(app, /popovertarget: id, popovertargetaction: "hide"/);
+	assert.match(app, /Object\.hasOwn\(HTMLElement\.prototype, "popover"\)/);    // and a plain fixed box where there is no popover
+	const page = read("app/index.html");
+	assert.match(page, /<div id="toasts" role="region" aria-label="Notifications"><\/div>/);
+	assert.match(page, /<div id="announce" class="sr" aria-live="polite"><\/div>/);
+});
+
 test("the manifest can be installed: a fixed id and icons that exist", () => {
 	const manifest = JSON.parse(read("app/manifest.webmanifest"));
 	assert.equal(manifest.id, "/");
@@ -43,7 +55,7 @@ test("the offline worker keeps only the app's own files, and all of them exist",
 
 test("the API, the sign-in and the MCP endpoint reach the Worker and are never stored offline", () => {
 	const skipped = list(read("app/sw.js"), "NOT_OURS");
-	for (const path of ["/mcp", "/mcp/", "/api/v1/status", "/auth/login", CALLBACK_PATH, CLIENT_PATH, "/healthz",
+	for (const path of ["/mcp", "/mcp/", "/api/v1/status", "/auth/login", CALLBACK_PATH, CLIENT_PATH, "/healthz", "/reports",
 		"/.well-known/oauth-protected-resource/mcp"]) {
 		assert.ok(toWorker(path), `${path} would be answered by a static file`);
 		assert.ok(skipped.some((prefix) => path.startsWith(prefix)), `${path} would go through the offline worker`);
@@ -57,7 +69,13 @@ test("the app directory holds nothing unexpected, and the pages never build HTML
 	assert.deepEqual(files, ["_headers", "app.css", "app.js", "fonts", "icons", "index.html", "manifest.webmanifest", "sw.js"]);
 	assert.doesNotMatch(read("app/app.js"), /innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(/);
 	const headers = read("app/_headers");
-	assert.match(headers, /Content-Security-Policy: default-src 'none'; script-src 'self';/);
+	assert.match(headers, /Content-Security-Policy: default-src 'none'; script-src 'self' 'report-sample';/);
 	assert.doesNotMatch(headers, /unsafe-inline|unsafe-eval/);
+	// Trusted Types are required, only the app's one policy may exist, and what is blocked is reported.
+	assert.match(headers, /require-trusted-types-for 'script'; trusted-types recall; report-uri \/reports; report-to default/);
+	assert.match(headers, /Reporting-Endpoints: default="\/reports"/);
+	const app = read("app/app.js");
+	assert.equal([...app.matchAll(/createPolicy\("([^"]+)"/g)].map((m) => m[1]).join(), "recall");
+	assert.doesNotMatch(app, /register\("\/sw\.js"\)|\bsetAttribute\("on|new Function|setTimeout\("/);
 	assert.doesNotMatch(read("app/index.html"), /<script(?![^>]*\bsrc=)|\son\w+=|style="/);
 });
