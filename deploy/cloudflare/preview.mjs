@@ -182,6 +182,12 @@ createServer(async (req, res) => {
 		if (url.pathname === "/auth/logout" && req.method === "POST") {
 			return send(res, 204, "text/plain", "", { "set-cookie": "preview=; Path=/; Max-Age=0" });
 		}
+		if (url.pathname === "/reports") { // what the browser blocked under the app's headers
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			console.log(`browser report: ${Buffer.concat(chunks).toString().slice(0, 600)}`);
+			return send(res, 204, "text/plain", "");
+		}
 		if (url.pathname.startsWith("/api/")) {
 			if (req.method !== "GET" && !req.headers["x-recall-app"]) return json(res, 403, { error: "this request did not come from the recall app" });
 			if (!cookieOf(req)) return json(res, 401, { error: "sign in first" });

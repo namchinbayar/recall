@@ -7,6 +7,7 @@
 // with the app's session cookie. recall checks that token like any other. A timer keeps the
 // container running so the first request after a quiet spell does not wait for a start.
 import { DurableObject } from "cloudflare:workers";
+import { REPORTS_PATH, receive } from "./reports.js";
 import { COOKIE, Sessions, Unavailable } from "./session.js";
 
 const PORT = 8791;
@@ -187,6 +188,8 @@ export class RecallServer extends DurableObject {
 
 export default {
 	fetch(request, env) {
+		// What a browser blocked under the app's headers: logged here, without waking the container.
+		if (new URL(request.url).pathname === REPORTS_PATH) return receive(request);
 		return env.RECALL.getByName("main").fetch(request);
 	},
 };

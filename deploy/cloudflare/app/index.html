@@ -57,7 +57,9 @@
   </form>
 </dialog>
 
-<p id="toast" role="status" aria-live="polite"></p>
+<div id="toasts" role="region" aria-label="Notifications"></div>
+<p id="announce-label" class="sr" hidden>Screen reader announcements</p>
+<div id="announce" class="sr" aria-live="polite"></div>
 
 <noscript><p class="notice">recall needs JavaScript to run.</p></noscript>
 </body>
